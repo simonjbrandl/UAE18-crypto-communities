@@ -1,0 +1,66 @@
+---
+title: "UAE18 crypto communities"
+author: "Simon j Brandl"
+date: "11/22/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#load packages
+library(tidyverse)
+library(vegan)
+library(nlme)
+library(MASS)
+library(ggpubr)
+library(ggrepel)
+library(colorRamps)
+library(Hmisc)
+```
+
+```{r}
+#load datasets
+comms <- read.csv(file = "UAE18_RawData_Comms.csv")
+ctmax <- read.csv(file = "UAE_CT.csv")
+comms$Genspe <- paste(comms$Genus, comms$Species, sep = " ")
+ctmax$Genspe <- paste(ctmax$Genus, ctmax$Species, sep = " ")
+```
+
+```{r pressure, echo=FALSE}
+#start with community analyses
+# 1. compare abundance, biomass, diversity
+# 2. compare community composition
+# calculate surface area for each bommie 
+# radius first (2*curved surface length/2*pi)
+comms$radius <- (2*comms$Dimension)/(2*pi)
+# surface area (4*pi*radius^2)/2 and divide by 10000 for square meters
+comms$SA <- ((4*pi*comms$radius^2)/2)/10000
+
+###get biomass and diversity estimates for Arabian Gulf and Gulf of Oman
+comm_means <- comms %>% group_by(Location, Sitename) %>% summarize(Biomass = sum(W), Abundance = n(), Speciesrichness = length(unique(Genspe)), SA = mean(SA))
+comm_means$Density <- comm_means$Abundance/comm_means$SA
+comm_means$Biomass <- comm_means$Biomass/comm_means$SA
+comm_means$Species_density <- comm_means$specric/comm_means$SA
+
+# prep for plotting
+comm_gather <- comm_means %>% gather(key = vari, value = measurement, -c(1:4,6,9))
+###plot data
+comm_plot <- ggplot(comm_gather, aes(x = Location, y = log(measurement), color = Location))+
+  geom_jitter(alpha = 0.7, width = 0.1) +
+  stat_summary(fun.data = "mean_cl_boot", size = 1.1) +
+  facet_grid(~vari) +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                       panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=14),
+                     axis.text.x = element_text(size = 14),
+                     axis.text.y = element_text(size = 14),
+                     legend.position="none") +
+  scale_color_manual(values = c("#00B0F0", "#A5F9A5"))
+comm_plot
+# ggsave("p1.pdf", plot = crypto_plot, width = 9, height = 5)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
