@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 #load packages
+library(plyr)
 library(tidyverse)
 library(vegan)
 library(nlme)
@@ -18,15 +19,22 @@ library(MASS)
 library(ggpubr)
 library(ggrepel)
 library(colorRamps)
-library(Hmisc)
 ```
 
 ```{r}
 #load datasets
 comms <- read.csv(file = "UAE18_RawData_Comms.csv")
-ctmax <- read.csv(file = "UAE_CT.csv")
+ctdat <- read.csv(file = "UAE_CT.csv")
 comms$Genspe <- paste(comms$Genus, comms$Species, sep = " ")
-ctmax$Genspe <- paste(ctmax$Genus, ctmax$Species, sep = " ")
+ctdat$Genspe <- paste(ctdat$Genus, ctdat$Species, sep = " ")
+ctdat <- ctdat %>% mutate(Distribution = case_when(Tax == "ECSEPULC" ~ "AG+GoM",
+                                         Tax == "CORYANOM" ~ "AG+GoM",
+                                         Tax == "ENNEVENT" ~ "AG+GoM",
+                                         Tax == "HELCFUSC" ~ "GoM",
+                                         Tax == "HETEVULG" ~ "GoM",
+                                         Tax == "EVIOGUTT" ~ "GoM"))
+ctmax <- subset(ctdat, ctdat$Ctmax != "NA")
+ctmin <- subset(ctdat, ctdat$Ctmin != "NA")
 ```
 
 ```{r pressure, echo=FALSE}
@@ -42,25 +50,284 @@ comms$SA <- ((4*pi*comms$radius^2)/2)/10000
 ###get biomass and diversity estimates for Arabian Gulf and Gulf of Oman
 comm_means <- comms %>% group_by(Location, Sitename) %>% summarize(Biomass = sum(W), Abundance = n(), Speciesrichness = length(unique(Genspe)), SA = mean(SA))
 comm_means$Density <- comm_means$Abundance/comm_means$SA
-comm_means$Biomass <- comm_means$Biomass/comm_means$SA
-comm_means$Species_density <- comm_means$specric/comm_means$SA
+comm_means$Biomass_per_m2 <- comm_means$Biomass/comm_means$SA
 
-# prep for plotting
-comm_gather <- comm_means %>% gather(key = vari, value = measurement, -c(1:4,6,9))
-###plot data
-comm_plot <- ggplot(comm_gather, aes(x = Location, y = log(measurement), color = Location))+
-  geom_jitter(alpha = 0.7, width = 0.1) +
-  stat_summary(fun.data = "mean_cl_boot", size = 1.1) +
-  facet_grid(~vari) +
+# plot density data
+density_plot <- ggplot(comm_means, aes(x = Location, y = Density, color = Location))+
+  geom_jitter(aes(fill = Location), alpha = 0.5, width = 0.1, color = "black", shape = 23, size = 3) +
+  stat_summary(fun.data = "mean_cl_boot", size = 1) +
     theme_bw() + theme(panel.grid.major = element_blank(), 
                        panel.grid.minor = element_blank(),
                      axis.title = element_text(size=14),
                      axis.text.x = element_text(size = 14),
                      axis.text.y = element_text(size = 14),
                      legend.position="none") +
-  scale_color_manual(values = c("#00B0F0", "#A5F9A5"))
+  scale_color_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_fill_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_y_continuous(limits = c(0, 45), breaks = seq(0,45,5))+
+  xlab(NULL)
+density_plot
+
+# plot species richness data
+speciesrichnessplot <- ggplot(comm_means, aes(x = Location, y = Speciesrichness, color = Location))+
+  geom_jitter(aes(fill = Location), alpha = 0.5, width = 0.1, color = "black", shape = 23, size = 3) +
+  stat_summary(fun.data = "mean_cl_boot", size = 1) +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                       panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=14),
+                     axis.text.x = element_text(size = 14),
+                     axis.text.y = element_text(size = 14),
+                     legend.position="none") +
+  scale_color_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_fill_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_y_continuous(limits = c(0, 30), breaks = seq(0,30,5))+
+  xlab(NULL)
+speciesrichnessplot
+
+# plot species richness data
+biomassplot <- ggplot(comm_means, aes(x = Location, y = Biomass_per_m2, color = Location))+
+  geom_jitter(aes(fill = Location), alpha = 0.5, width = 0.1, color = "black", shape = 23, size = 3) +
+  stat_summary(fun.data = "mean_cl_boot", size = 1) +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                       panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=14),
+                     axis.text.x = element_text(size = 14),
+                     axis.text.y = element_text(size = 14),
+                     legend.position="none") +
+  scale_color_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_fill_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_y_continuous(limits = c(0, 35), breaks = seq(0,35,5)) +
+  xlab(NULL)
+biomassplot
+
+# stitch three plots together
+comm_plots <- ggarrange(speciesrichnessplot, density_plot, biomassplot, nrow = 3, ncol = 1)
+comm_plots
+ggsave("comm_plots.pdf", plot = comm_plots, width = 3, height = 8)
+
+###plot data
+comm_plot <- ggplot(comm_gather, aes(x = Location, y = log(measurement), color = Location))+
+  geom_jitter(alpha = 0.7, width = 0.1) +
+  stat_summary(fun.data = "mean_cl_boot", size = 1.1) +
+  facet_grid(vari~1) +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                       panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=14),
+                     axis.text.x = element_text(size = 14),
+                     axis.text.y = element_text(size = 14),
+                     legend.position="none") +
+  scale_color_manual(values = c("#00B0F0", "#ed68fc"))
 comm_plot
-# ggsave("p1.pdf", plot = crypto_plot, width = 9, height = 5)
+ggsave("p1.pdf", plot = comm_plot, width = 5, height = 9)
+
+# 2. Communuity composition
+# create variable of 1s for count
+comms$count = 1
+comms_wide <- comms %>% 
+  group_by(Location, Sitenumber, Genspe) %>%
+  summarize(totaln = sum(count)) %>%
+  spread(Genspe, totaln, fill = 0) 
+
+###run MDS
+comp_mds <- metaMDS(comms_wide[-c(1:2)], k = 2, metric = "bray", trymax = 1000)
+comp_mds
+###get values and plot in ggplot
+site.scores <- as.tibble(scores(comp_mds))
+site.scores$Location <- comms_wide$Location
+site.scores$Sitenumber <- comms_wide$Sitenumber
+
+###create convex hulls function
+convex_hull <- function(site.scores) site.scores[chull(site.scores$NMDS1, site.scores$NMDS2),] 
+
+###run convex hulls on habitats
+location_hulls <- ddply(site.scores, "Location", convex_hull)
+
+
+###create vector with habitat names in center of convex hulls
+location_centers <- location_hulls %>% group_by(Location) %>% summarize(NMDS1 = mean(NMDS1), NMDS2 = mean(NMDS2))
+
+devtools::install_github("seananderson/ggsidekick")
+###plot mds results
+# plot one species name
+comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
+  #overlay convex hulls
+  geom_polygon(data = location_hulls, aes(x = NMDS1, y = NMDS2, 
+                                         fill = Location, 
+                                         group = Location), 
+               alpha = 0.4, lty = 1, lwd = 0.1, color = "black") +
+  #overlay points
+  geom_point(size = 2.5, aes(color = Location, group = Location)) +
+  geom_text(data = location_centers, aes(x = NMDS1, y = NMDS2, label = Location), 
+            size = 4) + 
+  theme_sleek()+
+  scale_color_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_fill_manual(values = c("#00B0F0", "#ed68fc"))
+
+comp_plot
+ggsave("comp_plot.pdf", plot = comp_plot, width = 7, height = 5, useDingbats=FALSE)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+``` {r}
+# ct max and ctmin
+ctmax
+ctmaxmod <- lm(Ctmax ~ Distribution, data = ctmax)
+summary(ctmaxmod)
+ctmax_sum <- ctmax %>% group_by(Distribution) %>% summarize(mean = mean(Ctmax), sd = sd(Ctmax), n = n()) %>%
+  mutate(se = sd / sqrt(n),
+         lci = mean - qt(1 - (0.05 / 2), n - 1) * se,
+         uci = mean + qt(1 - (0.05 / 2), n - 1) * se)
+
+ctmaxplot <- ggplot(data = ctmax)+
+  geom_jitter(aes(x = Genspe, y = Ctmax, color = Location, fill = Location, shape = Distribution), alpha = 0.7, width = 0.1, color = "black") +
+  geom_rect(data = ctmax_sum, aes(ymin =  lci, ymax = uci, xmin = 0, xmax = 7), alpha = 0.1) +
+  geom_hline(data = ctmax_sum, aes(yintercept = mean)) +
+  stat_summary(aes(x = Genspe, y = Ctmax, color = Location, fill = Location, shape = Distribution), fun.data = "mean_cl_boot", size = 0.9, color = "black") +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                       panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=14),
+                     axis.text.x = element_text(size = 14),
+                     axis.text.y = element_text(size = 14),
+                     legend.position="none") +
+  scale_color_manual(values = c("#00B0F0", "#ed68fc", "black")) +
+  scale_fill_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_shape_manual(values = c(22,23)) +
+  scale_y_continuous(limits = c(35,39), breaks = seq(35,39,0.5))
+ctmaxplot
+
+
+ctminmod <- lm(Ctmin ~ Distribution, data = ctmin)
+summary(ctminmod)
+ctmin_sum <- ctmin %>% group_by(Location) %>% summarize(mean = mean(Ctmin), sd = sd(Ctmin), n = n()) %>%
+  mutate(se = sd / sqrt(n),
+         lci = mean - qt(1 - (0.05 / 2), n - 1) * se,
+         uci = mean + qt(1 - (0.05 / 2), n - 1) * se)
+ctminplot <- ggplot(data = ctmin)+
+  geom_jitter(aes(x = Genspe, y = Ctmin, color = Location, fill = Location, shape = Distribution), alpha = 0.7, width = 0.1, color = "black") +
+  geom_rect(data = ctmin_sum, aes(ymin =  lci, ymax = uci, xmin = 0, xmax = 7), alpha = 0.1) +
+  geom_hline(data = ctmin_sum, aes(yintercept = mean)) +
+  stat_summary(aes(x = Genspe, y = Ctmin, color = Location, fill = Location, shape = Distribution), fun.data = "mean_cl_boot", size = 0.9, color = "black") +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                       panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=14),
+                     axis.text.x = element_text(size = 14),
+                     axis.text.y = element_text(size = 14),
+                     legend.position="none") +
+  scale_color_manual(values = c("#00B0F0", "#ed68fc", "black")) +
+  scale_fill_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_shape_manual(values = c(22,23)) +
+  scale_y_continuous(limits = c(10,14), breaks = seq(10,14,0.5))
+ctminplot
+
+ctplots <- ggarrange(ctmaxplot, ctminplot, nrow = 2, ncol = 1)
+
+ggsave("ct_plot.pdf", plot = ctplots, width = 7, height = 8, useDingbats=FALSE)
+```
+
+``` {r}
+# map of study region
+
+####FIGURE 1B####
+library(ggmap)
+
+world <- map_data("world")
+world_sub <- subset(world, world$long >= 50 & world$long <= 60 & world$lat >= 20 & world$lat <= 30)
+
+country_names <- world_sub %>% group_by(region) %>% summarize(lat = mean(lat), long = mean(long))
+
+UAEcoord <- comms[c(2,3,20,21)]
+UAEcoord_unique <- unique(UAEcoord)
+
+middle.east <- ggplot() +
+  geom_map(data = world_sub, map = world, aes(x = long, y = lat, map_id = region), fill = "grey69", color = "grey46", lwd = 0.1) +
+  geom_point(data = UAEcoord_unique, aes(x = Long, y = Lat, color = Location), size = 3, alpha = 1) +
+  xlab("Longitude") + ylab("Latitude") +
+  # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
+  # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
+  # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
+  annotate("text", label = "United Arab Emirates", x = 54, y = 23.5, size = 3, colour = "black") +
+  scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
+  theme_bw() + theme(axis.title = element_text(size=10),
+                     axis.text.x = element_text(
+                       size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.text=element_text(size=10),
+                     legend.title = element_text(size = 10, face = "bold"),
+                     panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                     legend.position = c(0.5, 0.9),
+                     legend.direction = "horizontal",
+                     legend.background = element_rect(fill="white", color = "black", size=0.2))
+
+middle.east
+ggsave("middle_east.pdf", plot = middle.east, width = 6, height = 5, useDingbats=FALSE)
+
+UAElarge <- subset(world, world$long >= -10 & world$long <= 120 & world$lat >= 0 & world$lat <= 70)
+
+middle.east.large <- ggplot() +
+  geom_map(data = UAElarge, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
+  xlab("Longitude") + ylab("Latitude") +
+  # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
+  # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
+  # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
+  scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
+  theme_bw() + theme(axis.title = element_text(size=10),
+                     axis.text.x = element_text(
+                       size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.text=element_text(size=10),
+                     legend.title = element_text(size = 10, face = "bold"),
+                     panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                     legend.position = c(0.5, 0.9),
+                     legend.direction = "horizontal",
+                     legend.background = element_rect(fill="white", color = "black", size=0.2))
+
+middle.east.large
+ggsave("middle_east_large.pdf", plot = middle.east.large, width = 6, height = 4, useDingbats=FALSE)
+
+
+UAEmid <- subset(world, world$long >= 30 & world$long <= 80 & world$lat >= 10 & world$lat <= 40)
+
+middle.east.mid <- ggplot() +
+  geom_map(data = UAEmid, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
+  xlab("Longitude") + ylab("Latitude") +
+  # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
+  # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
+  # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
+  scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
+  theme_bw() + theme(axis.title = element_text(size=10),
+                     axis.text.x = element_text(
+                       size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.text=element_text(size=10),
+                     legend.title = element_text(size = 10, face = "bold"),
+                     panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                     legend.position = c(0.5, 0.9),
+                     legend.direction = "horizontal",
+                     legend.background = element_rect(fill="white", color = "black", size=0.2))
+
+middle.east.mid
+ggsave("middle_east_large.pdf", plot = middle.east.large, width = 6, height = 4, useDingbats=FALSE)
+
+america <- subset(world, world$region == "United States of America" & world$region == "Canada")
+
+middle.east.mid <- ggplot() +
+  geom_map(data = UAEmid, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
+  xlab("Longitude") + ylab("Latitude") +
+  # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
+  # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
+  # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
+  scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
+  theme_bw() + theme(axis.title = element_text(size=10),
+                     axis.text.x = element_text(
+                       size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.text=element_text(size=10),
+                     legend.title = element_text(size = 10, face = "bold"),
+                     panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                     legend.position = c(0.5, 0.9),
+                     legend.direction = "horizontal",
+                     legend.background = element_rect(fill="white", color = "black", size=0.2))
+
+middle.east.mid
+```
+
+
