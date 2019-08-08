@@ -1,6 +1,6 @@
 ---
 title: "UAE18 crypto communities"
-author: "Simon j Brandl"
+author: "Simon J Brandl"
 date: "11/22/2018"
 output: html_document
 ---
@@ -15,7 +15,7 @@ library(plyr)
 library(tidyverse)
 library(vegan)
 library(nlme)
-library(MASS)
+library(lme4)
 library(ggpubr)
 library(ggrepel)
 library(colorRamps)
@@ -25,8 +25,8 @@ library(colorRamps)
 #load datasets
 comms <- read.csv(file = "UAE18_RawData_Comms.csv")
 ctdat <- read.csv(file = "UAE_CT.csv")
-comms$Genspe <- paste(comms$Genus, comms$Species, sep = " ")
-ctdat$Genspe <- paste(ctdat$Genus, ctdat$Species, sep = " ")
+comms$Genspe <- paste(substr(comms$Genus, 0,3), comms$Species, sep = ". ")
+ctdat$Genspe <- paste(substr(ctdat$Genus, 0,3), ctdat$Species, sep = ". ")
 ctdat <- ctdat %>% mutate(Distribution = case_when(Tax == "ECSEPULC" ~ "AG+GoM",
                                          Tax == "CORYANOM" ~ "AG+GoM",
                                          Tax == "ENNEVENT" ~ "AG+GoM",
@@ -48,9 +48,17 @@ comms$radius <- (2*comms$Dimension)/(2*pi)
 comms$SA <- ((4*pi*comms$radius^2)/2)/10000
 
 ###get biomass and diversity estimates for Arabian Gulf and Gulf of Oman
-comm_means <- comms %>% group_by(Location, Sitename) %>% summarize(Biomass = sum(W), Abundance = n(), Speciesrichness = length(unique(Genspe)), SA = mean(SA))
+comm_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summarize(Biomass = sum(W), Abundance = n(), Speciesrichness = length(unique(Genspe)), SA = mean(SA))
 comm_means$Density <- comm_means$Abundance/comm_means$SA
 comm_means$Biomass_per_m2 <- comm_means$Biomass/comm_means$SA
+
+########################EVIOTA
+eviota.abu <- comms %>%
+  filter(Location == "GoO",
+         Genus == "Eviota") %>%
+
+#run GLM with abundance data and offset for surface area sampled
+# abundance.model <- glmer.nb()
 
 # plot density data
 density_plot <- ggplot(comm_means, aes(x = Location, y = Density, color = Location))+
@@ -62,8 +70,8 @@ density_plot <- ggplot(comm_means, aes(x = Location, y = Density, color = Locati
                      axis.text.x = element_text(size = 14),
                      axis.text.y = element_text(size = 14),
                      legend.position="none") +
-  scale_color_manual(values = c("#00B0F0", "#ed68fc")) +
-  scale_fill_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_color_manual(values = c("forestgreen", "gray5")) +
+  scale_fill_manual(values = c("forestgreen", "gray5")) +
   scale_y_continuous(limits = c(0, 45), breaks = seq(0,45,5))+
   xlab(NULL)
 density_plot
@@ -78,8 +86,8 @@ speciesrichnessplot <- ggplot(comm_means, aes(x = Location, y = Speciesrichness,
                      axis.text.x = element_text(size = 14),
                      axis.text.y = element_text(size = 14),
                      legend.position="none") +
-  scale_color_manual(values = c("#00B0F0", "#ed68fc")) +
-  scale_fill_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_color_manual(values = c("forestgreen", "gray5")) +
+  scale_fill_manual(values = c("forestgreen", "gray5")) +
   scale_y_continuous(limits = c(0, 30), breaks = seq(0,30,5))+
   xlab(NULL)
 speciesrichnessplot
@@ -94,8 +102,8 @@ biomassplot <- ggplot(comm_means, aes(x = Location, y = Biomass_per_m2, color = 
                      axis.text.x = element_text(size = 14),
                      axis.text.y = element_text(size = 14),
                      legend.position="none") +
-  scale_color_manual(values = c("#00B0F0", "#ed68fc")) +
-  scale_fill_manual(values = c("#00B0F0", "#ed68fc")) +
+  scale_color_manual(values = c("forestgreen", "gray5")) +
+  scale_fill_manual(values = c("forestgreen", "gray5")) +
   scale_y_continuous(limits = c(0, 35), breaks = seq(0,35,5)) +
   xlab(NULL)
 biomassplot
@@ -105,36 +113,24 @@ comm_plots <- ggarrange(speciesrichnessplot, density_plot, biomassplot, nrow = 3
 comm_plots
 ggsave("comm_plots.pdf", plot = comm_plots, width = 3, height = 8)
 
-###plot data
-comm_plot <- ggplot(comm_gather, aes(x = Location, y = log(measurement), color = Location))+
-  geom_jitter(alpha = 0.7, width = 0.1) +
-  stat_summary(fun.data = "mean_cl_boot", size = 1.1) +
-  facet_grid(vari~1) +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                       panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=14),
-                     axis.text.x = element_text(size = 14),
-                     axis.text.y = element_text(size = 14),
-                     legend.position="none") +
-  scale_color_manual(values = c("#00B0F0", "#ed68fc"))
-comm_plot
-ggsave("p1.pdf", plot = comm_plot, width = 5, height = 9)
-
 # 2. Communuity composition
 # create variable of 1s for count
 comms$count = 1
 comms_wide <- comms %>% 
-  group_by(Location, Sitenumber, Genspe) %>%
+  group_by(Location, Site, Sitenumber, Genspe) %>%
   summarize(totaln = sum(count)) %>%
   spread(Genspe, totaln, fill = 0) 
 
 ###run MDS
-comp_mds <- metaMDS(comms_wide[-c(1:2)], k = 2, metric = "bray", trymax = 1000)
+comp_mds <- metaMDS(comms_wide[-c(1:3)], k = 2, metric = "bray", trymax = 1000)
 comp_mds
 ###get values and plot in ggplot
 site.scores <- as.tibble(scores(comp_mds))
 site.scores$Location <- comms_wide$Location
+site.scores$Site <- comms_wide$Site
 site.scores$Sitenumber <- comms_wide$Sitenumber
+site.scores <- site.scores %>% inner_join(comm_means)
+
 
 ###create convex hulls function
 convex_hull <- function(site.scores) site.scores[chull(site.scores$NMDS1, site.scores$NMDS2),] 
@@ -146,7 +142,6 @@ location_hulls <- ddply(site.scores, "Location", convex_hull)
 ###create vector with habitat names in center of convex hulls
 location_centers <- location_hulls %>% group_by(Location) %>% summarize(NMDS1 = mean(NMDS1), NMDS2 = mean(NMDS2))
 
-devtools::install_github("seananderson/ggsidekick")
 ###plot mds results
 # plot one species name
 comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
@@ -156,15 +151,24 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
                                          group = Location), 
                alpha = 0.4, lty = 1, lwd = 0.1, color = "black") +
   #overlay points
-  geom_point(size = 2.5, aes(color = Location, group = Location)) +
-  geom_text(data = location_centers, aes(x = NMDS1, y = NMDS2, label = Location), 
-            size = 4) + 
-  theme_sleek()+
-  scale_color_manual(values = c("#00B0F0", "#ed68fc")) +
-  scale_fill_manual(values = c("#00B0F0", "#ed68fc"))
+  geom_point(aes(color = Location, group = Location, fill = Location,
+                             shape = Site, size = Speciesrichness)) +
+  theme_bw()+
+  theme(legend.position = "right") +
+  scale_color_manual(values = c("forestgreen", "gray5")) +
+  scale_fill_manual(values = c("forestgreen", "gray5")) +
+  scale_shape_manual(values = c(8, 21:25))
 
 comp_plot
 ggsave("comp_plot.pdf", plot = comp_plot, width = 7, height = 5, useDingbats=FALSE)
+
+###check size structure
+size_str_plot <- ggplot(comms, aes(x = log10(W), fill = Location)) +
+  geom_density(alpha = 0.2, adjust = 5) +
+  facet_grid(Location~.) +
+  scale_color_manual(values = c("forestgreen", "gray5")) +
+  scale_fill_manual(values = c("forestgreen", "gray5"))
+size_str_plot
 ```
 
 ``` {r}
@@ -180,18 +184,16 @@ ctmax_sum <- ctmax %>% group_by(Distribution) %>% summarize(mean = mean(Ctmax), 
 ctmaxplot <- ggplot(data = ctmax)+
   geom_jitter(aes(x = Genspe, y = Ctmax, color = Location, fill = Location, shape = Distribution), alpha = 0.7, width = 0.1, color = "black") +
   geom_rect(data = ctmax_sum, aes(ymin =  lci, ymax = uci, xmin = 0, xmax = 7), alpha = 0.1) +
-  geom_hline(data = ctmax_sum, aes(yintercept = mean)) +
+  geom_hline(data = ctmax_sum, aes(yintercept = mean), lty = c(2,3)) +
   stat_summary(aes(x = Genspe, y = Ctmax, color = Location, fill = Location, shape = Distribution), fun.data = "mean_cl_boot", size = 0.9, color = "black") +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                       panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=14),
-                     axis.text.x = element_text(size = 14),
-                     axis.text.y = element_text(size = 14),
-                     legend.position="none") +
-  scale_color_manual(values = c("#00B0F0", "#ed68fc", "black")) +
-  scale_fill_manual(values = c("#00B0F0", "#ed68fc")) +
+    theme_bw() + theme(legend.position="none",
+                       axis.text.x = element_text(angle = 45, hjust = 1, face = "italic", size = 6),
+                       axis.title.x=element_blank()) +
+  scale_color_manual(values = c("forestgreen", "gray5", "black")) +
+  scale_fill_manual(values = c("forestgreen", "gray5")) +
   scale_shape_manual(values = c(22,23)) +
-  scale_y_continuous(limits = c(35,39), breaks = seq(35,39,0.5))
+  scale_y_continuous(limits = c(35,39), breaks = seq(35,39,0.5))+
+  ylab("Critical thermal maximum (º Celsius)")
 ctmaxplot
 
 
@@ -204,18 +206,16 @@ ctmin_sum <- ctmin %>% group_by(Location) %>% summarize(mean = mean(Ctmin), sd =
 ctminplot <- ggplot(data = ctmin)+
   geom_jitter(aes(x = Genspe, y = Ctmin, color = Location, fill = Location, shape = Distribution), alpha = 0.7, width = 0.1, color = "black") +
   geom_rect(data = ctmin_sum, aes(ymin =  lci, ymax = uci, xmin = 0, xmax = 7), alpha = 0.1) +
-  geom_hline(data = ctmin_sum, aes(yintercept = mean)) +
+  geom_hline(data = ctmin_sum, aes(yintercept = mean), lty = c(2,3)) +
   stat_summary(aes(x = Genspe, y = Ctmin, color = Location, fill = Location, shape = Distribution), fun.data = "mean_cl_boot", size = 0.9, color = "black") +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                       panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=14),
-                     axis.text.x = element_text(size = 14),
-                     axis.text.y = element_text(size = 14),
-                     legend.position="none") +
-  scale_color_manual(values = c("#00B0F0", "#ed68fc", "black")) +
-  scale_fill_manual(values = c("#00B0F0", "#ed68fc")) +
+    theme_bw() + theme(legend.position="none",
+                       axis.text.x = element_text(angle = 45, hjust = 1, face = "italic", size = 6),
+                       axis.title.x=element_blank()) +
+  scale_color_manual(values = c("forestgreen", "gray5", "black")) +
+  scale_fill_manual(values = c("forestgreen", "gray5")) +
   scale_shape_manual(values = c(22,23)) +
-  scale_y_continuous(limits = c(10,14), breaks = seq(10,14,0.5))
+  scale_y_continuous(limits = c(10,14), breaks = seq(10,14,0.5)) +
+  ylab("Critical thermal minimum (º Celsius)")
 ctminplot
 
 ctplots <- ggarrange(ctmaxplot, ctminplot, nrow = 2, ncol = 1)
@@ -239,7 +239,7 @@ UAEcoord_unique <- unique(UAEcoord)
 
 middle.east <- ggplot() +
   geom_map(data = world_sub, map = world, aes(x = long, y = lat, map_id = region), fill = "grey69", color = "grey46", lwd = 0.1) +
-  geom_point(data = UAEcoord_unique, aes(x = Long, y = Lat, color = Location), size = 3, alpha = 1) +
+  geom_point(data = UAEcoord_unique, aes(x = long, y = Lat, color = Location), size = 3, alpha = 1) +
   xlab("Longitude") + ylab("Latitude") +
   # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
   # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
@@ -328,6 +328,85 @@ middle.east.mid <- ggplot() +
                      legend.background = element_rect(fill="white", color = "black", size=0.2))
 
 middle.east.mid
+```
+
+```{r}
+### gut content metabarcoding data
+detach("package:MASS", unload=TRUE)
+guts.meta <- read.csv(file = "UAE_Metabarcoding.csv")
+coi.seqs <- read.csv(file = "UAE_COI.csv")
+#create vector for column names 
+cnames <- as.character(coi.seqs$ID)
+coi.sub <- coi.seqs[c(19:106)] %>%
+  #grab columns of fish gut specimens
+  rownames_to_column %>% 
+  gather(var, value, -rowname) %>% 
+  spread(rowname, value) %>%
+  set_colnames(c("ID.match", cnames)) %>%
+  join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
+  select(-c(OTU_1, OTU_2, OTU_3, OTU_4, OTU_5, OTU_6)) %>%
+  select(ID.match, Location, Tax, everything()) 
+
+coi.rra <- coi.sub %>%
+  select(-c(Location, Tax)) %>%
+  gather(variable, value, -ID.match) %>%
+  group_by(ID.match) %>% 
+  mutate(percentage = value/sum(value)) %>% 
+  select(-value) %>% 
+  spread(variable, percentage)
+
+coi.pa <- coi.sub %>%
+    select(-c(ID.match, Location, Tax)) %>%
+  mutate_all(funs(case_when(. > 0 ~ 1,
+                       TRUE ~ 0)))
+### run mds
+coi_mds <- metaMDS(coi.pa, k = 2, trymax = 100, distance = "jaccard")
+coi_mds
+
+###get values and plot in ggplot
+coi.scores <- as.tibble(coi_mds$points)
+coi.scores$tax <- coi.sub$Tax
+coi.scores$location <- coi.sub$Location
+coi.scores$ID.match <- coi.sub$ID.match
+
+coi.scores1 <- coi.scores %>%
+  filter(tax %in% c("ENNEVENT", "ECSEPULC", "EVIOGUTT", "HETEVULG", "ANTESPEA"))
+
+
+###create convex hulls function
+convex_hull <- function(coi.scores1) coi.scores1[chull(coi.scores1$MDS1, coi.scores1$MDS2),] 
+
+###run convex hulls on habitats
+fish_hulls <- ddply(coi.scores1, "tax", convex_hull)
+
+### set colors
+taxsymbols <- c()
+
+###plot mds results
+# plot one species name
+fishgut_mdsplot <- ggplot(coi.scores1, aes(x = MDS1, y = MDS2)) +
+  #overlay convex hulls
+  geom_polygon(data = fish_hulls, aes(x = MDS1, y = MDS2,
+                                         fill = tax,
+                                         group = tax),
+               alpha = 0.3, lty = 1, lwd = 0.1) +
+  # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
+  #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
+  #overlay point
+  geom_point(size = 2, aes(color = tax, group = tax, shape = location)) +
+  theme_bw() + theme(panel.grid.major = element_blank(), 
+                     panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=14),
+                     axis.text.x = element_text(size = 14),
+                     axis.text.y = element_text(size = 14))
+  #   scale_y_continuous(limits = c(-1.2,1.2), breaks = seq(-1,1,0.5)) +
+  # scale_x_continuous(limits = c(-1.2,1.4), breaks = seq(-1,1,0.5)) +
+  # scale_color_manual(values = fishcolors) +
+  # scale_fill_manual(values = fishcolors)
+
+fishgut_mdsplot
+ggsave("mdsplot.pdf", fishgut_mdsplot, width = 10, height = 10, useDingbats = FALSE)
+
 ```
 
 
