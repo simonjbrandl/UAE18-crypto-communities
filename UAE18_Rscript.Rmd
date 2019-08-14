@@ -3,6 +3,8 @@ title: "UAE18 crypto communities"
 author: "Simon J Brandl"
 date: "11/22/2018"
 output: html_document
+editor_options:
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -12,6 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 #load packages
 library(plyr)
+library(dplyr)
 library(tidyverse)
 library(vegan)
 library(nlme)
@@ -52,10 +55,7 @@ comm_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summa
 comm_means$Density <- comm_means$Abundance/comm_means$SA
 comm_means$Biomass_per_m2 <- comm_means$Biomass/comm_means$SA
 
-########################EVIOTA
-eviota.abu <- comms %>%
-  filter(Location == "GoO",
-         Genus == "Eviota") %>%
+
 
 #run GLM with abundance data and offset for surface area sampled
 # abundance.model <- glmer.nb()
@@ -163,12 +163,83 @@ comp_plot
 ggsave("comp_plot.pdf", plot = comp_plot, width = 7, height = 5, useDingbats=FALSE)
 
 ###check size structure
-size_str_plot <- ggplot(comms, aes(x = log10(W), fill = Location)) +
-  geom_density(alpha = 0.2, adjust = 5) +
-  facet_grid(Location~.) +
+
+size.strs <- comms %>%
+  filter(Tax %in% c("ENNEVENT")) 
+table(size.strs$Tax, size.strs$Location)
+
+size_str_plot <- ggplot(size.strs, aes(x = Location, y = W, fill = Location)) +
+  geom_boxplot(notch = F)+
+  facet_grid(.~Tax) +
   scale_color_manual(values = c("forestgreen", "gray5")) +
-  scale_fill_manual(values = c("forestgreen", "gray5"))
+  scale_fill_manual(values = c("forestgreen", "gray5")) +
+  ylab("Weight in grams") +
+  theme_bw() + theme(legend.position="none")
 size_str_plot
+ggsave("Eventermaculus_size.pdf", size_str_plot, width = 4, height = 4, useDingbats = F)
+mod <- lm(log(W) ~ Tax*Location, data = size.strs)
+summary(mod)
+
+###comp abundance of three species in AG & GoO
+
+comp.abu <- comms %>%
+  filter(Tax %in% c("ENNEVENT", "CORYANOM", "ECSEPULC")) 
+# radius first (2*curved surface length/2*pi)
+comp.abu$radius <- (2*comp.abu$Dimension)/(2*pi)
+# surface area (4*pi*radius^2)/2 and divide by 10000 for square meters
+comp.abu$SA <- ((4*pi*comp.abu$radius^2)/2)/10000
+
+library(dplyr)
+
+metadat <- comp.abu %>%
+  group_by(Location, Sitename, Site) %>%
+  summarize(SA = mean(SA))
+###get biomass and diversity estimates for Arabian Gulf and Gulf of Oman
+comp.abu.means <- comp.abu %>%
+  group_by(Sitename, Genspe) %>% 
+  summarize(Biomass = sum(W), Abundance = n()) %>%
+  ungroup() %>%
+  complete(Sitename, Genspe,fill=list(n=0)) %>%
+  replace_na(list(Biomass = 0, Abundance = 0)) %>%
+  left_join(metadat, by = "Sitename") %>%
+  mutate(density = Abundance/SA,
+         biomassm2 = Biomass/SA) %>%
+  mutate(Tax = as.factor(Genspe))
+
+# plot density data
+density_plot_comp <- ggplot(comp.abu.means, aes(x = Location, y = density, color = Location))+
+  geom_jitter(aes(fill = Location), alpha = 0.5, width = 0.1, color = "black", shape = 23, size = 3) +
+  stat_summary(fun.data = "mean_cl_boot", size = 1) +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                       panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=14),
+                     axis.text.x = element_text(size = 14),
+                     axis.text.y = element_text(size = 14),
+                     legend.position="none") +
+  scale_color_manual(values = c("forestgreen", "gray5")) +
+  scale_fill_manual(values = c("forestgreen", "gray5")) +
+  scale_y_continuous(limits = c(-0.01, 16), breaks = seq(0,16,2))+
+  facet_wrap(. ~ Tax)
+
+density_plot_comp
+ggsave("density_comparisons.pdf", density_plot_comp, width = 8, height = 4, useDingbats = FALSE)
+
+biomass_plot_comp <- ggplot(comp.abu.means, aes(x = Location, y = biomassm2, color = Location))+
+  geom_jitter(aes(fill = Location), alpha = 0.5, width = 0.1, color = "black", shape = 23, size = 3) +
+  stat_summary(fun.data = "mean_cl_boot", size = 1) +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                       panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=14),
+                     axis.text.x = element_text(size = 14),
+                     axis.text.y = element_text(size = 14),
+                     legend.position="none") +
+  scale_color_manual(values = c("forestgreen", "gray5")) +
+  scale_fill_manual(values = c("forestgreen", "gray5")) +
+  scale_y_continuous(limits = c(-0.01, 9), breaks = seq(0,9,3))+
+  facet_wrap(. ~ Tax)
+
+biomass_plot_comp
+ggsave("density_comparisons.pdf", density_plot_comp, width = 8, height = 4, useDingbats = FALSE)
 ```
 
 ``` {r}
@@ -334,79 +405,676 @@ middle.east.mid
 ### gut content metabarcoding data
 detach("package:MASS", unload=TRUE)
 guts.meta <- read.csv(file = "UAE_Metabarcoding.csv")
-coi.seqs <- read.csv(file = "UAE_COI.csv")
+coi.seqs <- read.csv(file = "UAE_COI.csv") %>%
+  select(-c(UAE18862.1, UAE18400.1)) %>%
+  filter(!species %in% c("Coryogalops anomolus", 
+                         "Neopomacentrus miryae", 
+                         "Ecsenius pulcher", 
+                         "Belonidae sp. BOLD:AAE0217", 
+                         "Eviota guttata", 
+                         "Etheostoma flabellare", 
+                         "Homo sapiens", 
+                         "Butis gymnopomus",
+                         "Dinematichthys iluocoeteoides",
+                         "Oncorhynchus nerka"))
 #create vector for column names 
 cnames <- as.character(coi.seqs$ID)
-coi.sub <- coi.seqs[c(19:106)] %>%
+coi.sub <- coi.seqs[c(19:104)]%>%
   #grab columns of fish gut specimens
   rownames_to_column %>% 
   gather(var, value, -rowname) %>% 
   spread(rowname, value) %>%
   set_colnames(c("ID.match", cnames)) %>%
   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
-  select(-c(OTU_1, OTU_2, OTU_3, OTU_4, OTU_5, OTU_6)) %>%
-  select(ID.match, Location, Tax, everything()) 
+  select(ID.match, Location, Tax, everything()) %>% 
+  mutate(rowsum = rowSums(.[4:552])) %>%
+  filter(rowsum >= 1)
 
-coi.rra <- coi.sub %>%
-  select(-c(Location, Tax)) %>%
-  gather(variable, value, -ID.match) %>%
-  group_by(ID.match) %>% 
-  mutate(percentage = value/sum(value)) %>% 
-  select(-value) %>% 
-  spread(variable, percentage)
+coi.sub.tax <- coi.sub %>%
+  filter(Tax %in% c("ENNEVENT", "CORYANOM", "ECSEPULC"))
 
-coi.pa <- coi.sub %>%
-    select(-c(ID.match, Location, Tax)) %>%
+# coi.rra <- coi.sub.tax %>%
+#   select(-c(Location, Tax)) %>%
+#   gather(variable, value, -ID.match) %>%
+#   group_by(ID.match) %>% 
+#   mutate(percentage = value/sum(value)) %>% 
+#   select(-value) %>% 
+#   spread(variable, percentage)
+
+
+
+coi.pa <- coi.sub.tax %>%
+  select(-c(ID.match, Location, Tax)) %>%
   mutate_all(funs(case_when(. > 0 ~ 1,
-                       TRUE ~ 0)))
+                       TRUE ~ 0))) %>%
+  add_column(ID.match = coi.sub.tax$ID.match) %>%
+  select(ID.match, everything())
+
 ### run mds
-coi_mds <- metaMDS(coi.pa, k = 2, trymax = 100, distance = "jaccard")
+coi_mds <- metaMDS(coi.pa[-1], k = 3, trymax = 1000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
 coi_mds
 
 ###get values and plot in ggplot
 coi.scores <- as.tibble(coi_mds$points)
-coi.scores$tax <- coi.sub$Tax
-coi.scores$location <- coi.sub$Location
-coi.scores$ID.match <- coi.sub$ID.match
+coi.scores$tax <- coi.sub.tax$Tax
+coi.scores$location <- coi.sub.tax$Location
+coi.scores$ID.match <- coi.sub.tax$ID.match
 
 coi.scores1 <- coi.scores %>%
-  filter(tax %in% c("ENNEVENT", "ECSEPULC", "EVIOGUTT", "HETEVULG", "ANTESPEA"))
+  unite("taxloc", c(tax, location), remove = F)
+
+###do permanova
+coi.pa.perm <- adonis(coi.pa[-1] ~ location * tax, data = coi.scores1)
+coi.pa.perm
 
 
+###do simper
+coi.pa.sim <- as.list(simper(coi.pa[-1], coi.scores1$taxloc))
+simsum <- summary(coi.pa.sim)
+top3<-lapply(simsum, `[`,1:3,)
+otunames <- ldply(lapply(top3, rownames)) %>%
+  gather("comparison", "ID", V1, V2, V3) %>%
+  arrange(.id)
+
+top3long <- plyr::ldply(top3, data.frame) %>%
+  arrange(.id) %>%
+  select(.id) %>%
+  add_column(ID = otunames$ID)
+
+OTUcoords <- as.data.frame(coi_mds$species) %>%
+  add_column(ID = rownames(.))
+
+OTUtax <- coi.seqs[c(1:10)]
+
+top3coords <- top3long %>%
+  left_join(OTUcoords, by = "ID") %>%
+  left_join(OTUtax, by = "ID") %>%
+  mutate(taxID = case_when(pident >= 97 ~ paste(phylum, class, order, species, sep = " | "),
+                           pident >= 95 ~ paste(phylum, class, order, sep = " | "),
+                           pident >= 85 ~ paste(phylum, class, sep = " | "),
+                           pident >= 75 ~ paste(phylum),
+                           pident < 75 ~ "Unidentified")) %>%
+  mutate(oMDS1 = 0,
+         oMDS2 = 0) %>%
+  select(-.id) %>%
+  unique(.)
+
+# 4 is Arthropoda | Insecta (Tantytarsus)
+# 6 is also Arthropoda | Insecta (Tantytarsus)
+# 12 is also Arthropoda | Insecta (Tantytarsus)
 ###create convex hulls function
 convex_hull <- function(coi.scores1) coi.scores1[chull(coi.scores1$MDS1, coi.scores1$MDS2),] 
 
 ###run convex hulls on habitats
-fish_hulls <- ddply(coi.scores1, "tax", convex_hull)
+fish_hulls <- ddply(coi.scores1, "taxloc", convex_hull)
 
-### set colors
-taxsymbols <- c()
+# ### set colors
+taxloccols <- c("olivedrab4", "olivedrab2", "cyan4", "cyan2", "darkorchid4", "darkorchid2")
 
 ###plot mds results
 # plot one species name
-fishgut_mdsplot <- ggplot(coi.scores1, aes(x = MDS1, y = MDS2)) +
+mds.pa.coi.loc <- ggplot(coi.scores1, aes(x = MDS1, y = MDS2)) +
   #overlay convex hulls
   geom_polygon(data = fish_hulls, aes(x = MDS1, y = MDS2,
-                                         fill = tax,
-                                         group = tax),
-               alpha = 0.3, lty = 1, lwd = 0.1) +
+                                         color = taxloc,
+                                         group = taxloc), fill = "grey69",
+               alpha = 0.1, lty = 1, lwd = 0.1) +
   # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
   #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
   #overlay point
-  geom_point(size = 2, aes(color = tax, group = tax, shape = location)) +
+  geom_point(size = 2, aes(color = taxloc, group = taxloc, shape = location)) +
   theme_bw() + theme(panel.grid.major = element_blank(), 
                      panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=14),
-                     axis.text.x = element_text(size = 14),
-                     axis.text.y = element_text(size = 14))
-  #   scale_y_continuous(limits = c(-1.2,1.2), breaks = seq(-1,1,0.5)) +
-  # scale_x_continuous(limits = c(-1.2,1.4), breaks = seq(-1,1,0.5)) +
-  # scale_color_manual(values = fishcolors) +
-  # scale_fill_manual(values = fishcolors)
+                     axis.title = element_text(size=10),
+                     axis.text.x = element_text(size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.position = "none") +
+  scale_y_continuous(limits = c(-1.4,1.1), breaks = seq(-1,1,0.5)) +
+  scale_x_continuous(limits = c(-1.1,1.6), breaks = seq(-1,1,0.5)) +
+  scale_color_manual(values = taxloccols) +
+  scale_fill_manual(values = taxloccols)
 
-fishgut_mdsplot
-ggsave("mdsplot.pdf", fishgut_mdsplot, width = 10, height = 10, useDingbats = FALSE)
+mds.pa.coi.loc
 
+mds.top3.coi.loc <- ggplot(top3coords, aes(x = MDS1, y = MDS2)) +
+  geom_segment(data = top3coords, mapping = aes(xend = oMDS1, yend = oMDS2), lwd = 0.2, lty = 2) +
+  geom_point(size = 3, shape = 18) +
+    geom_label_repel(aes(label = taxID), size = 2) +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                     panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=10),
+                     axis.text.x = element_text(size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.position = "none") +
+    scale_y_continuous(limits = c(-1.4,1.1), breaks = seq(-1,1,0.5)) +
+  scale_x_continuous(limits = c(-1.1,1.6), breaks = seq(-1,1,0.5)) 
+mds.top3.coi.loc
+
+mds.coi.loc.vec <- ggarrange(mds.pa.coi.loc, mds.top3.coi.loc, ncol = 1, nrow = 2)
+
+ggsave("mds.pa.coi.loc.pdf", mds.coi.loc.vec, width = 7, height = 10, useDingbats = FALSE)
+
+### bring in other taxa
+coi.sub.taxloc <- coi.sub
+
+# coi.rra <- coi.sub.tax %>%
+#   select(-c(Location, Tax)) %>%
+#   gather(variable, value, -ID.match) %>%
+#   group_by(ID.match) %>% 
+#   mutate(percentage = value/sum(value)) %>% 
+#   select(-value) %>% 
+#   spread(variable, percentage)
+
+
+
+coi.pa.taxloc <- coi.sub.taxloc %>%
+  select(-c(ID.match, Location, Tax)) %>%
+  mutate_all(funs(case_when(. > 0 ~ 1,
+                       TRUE ~ 0))) %>%
+  add_column(ID.match = coi.sub.taxloc$ID.match) %>%
+  select(ID.match, everything())
+
+### run mds
+coi.mds.taxloc <- metaMDS(coi.pa.taxloc[-1], k = 3, trymax = 1000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
+coi.mds.taxloc
+
+###get values and plot in ggplot
+coi.scores.taxloc <- as.tibble(coi.mds.taxloc$points)
+coi.scores.taxloc$tax <- coi.sub.taxloc$Tax
+coi.scores.taxloc$location <- coi.sub.taxloc$Location
+coi.scores.taxloc$ID.match <- coi.sub.taxloc$ID.match
+
+coi.scores.taxloc1 <- coi.scores.taxloc %>%
+  unite("taxloc", c(tax, location), remove = F)
+
+
+###do permanova
+coi.pa.perm.taxloc <- adonis(coi.pa.taxloc[-1] ~ location * tax, data = coi.scores.taxloc1)
+coi.pa.perm.taxloc
+
+###do simper
+coi.pa.sim.taxloc <- as.list(simper(coi.pa.taxloc[-1], coi.scores.taxloc1$taxloc))
+simsum.taxloc <- summary(coi.pa.sim.taxloc)
+top3.taxloc<-lapply(simsum.taxloc, `[`,1:3,)
+otunames <- ldply(lapply(top3.taxloc, rownames)) %>%
+  gather("comparison", "ID", V1, V2, V3) %>%
+  arrange(.id)
+
+top3long.taxloc <- plyr::ldply(top3.taxloc, data.frame) %>%
+  arrange(.id) %>%
+  select(.id) %>%
+  add_column(ID = otunames$ID)
+
+OTUcoords.taxloc <- as.data.frame(coi.mds.taxloc$species) %>%
+  add_column(ID = rownames(.))
+
+OTUtax <- coi.seqs[c(1:10)]
+
+top3coords.taxloc <- top3long %>%
+  left_join(OTUcoords.taxloc, by = "ID") %>%
+  left_join(OTUtax, by = "ID") %>%
+  mutate(taxID = case_when(pident >= 97 ~ paste(phylum, class, order, species, sep = " | "),
+                           pident >= 95 ~ paste(phylum, class, order, sep = " | "),
+                           pident >= 85 ~ paste(phylum, class, sep = " | "),
+                           pident >= 75 ~ paste(phylum),
+                           pident < 75 ~ "Unidentified")) %>%
+  mutate(oMDS1 = 0,
+         oMDS2 = 0) %>%
+  select(-.id) %>%
+  unique(.) %>%
+  replace_na(list(taxID = "Chordata | Actinpterygii | Blenniiformes | Salarias fasciatus"))
+#7 is arthropoda tantytarsus again
+#12 is Salarias fasciatus
+
+###create convex hulls function
+convex_hull <- function(coi.scores.taxloc1) coi.scores.taxloc1[chull(coi.scores.taxloc1$MDS1, coi.scores.taxloc1$MDS2),] 
+
+###run convex hulls on habitats
+fish.hulls.taxloc <- ddply(coi.scores.taxloc1, "taxloc", convex_hull)
+
+# ### set colors
+taxcols <- c("gold2", "olivedrab4", "olivedrab2", "cyan4", "cyan2", "darkorchid4", "darkorchid2", "lightpink1", "royalblue2")
+
+###plot mds results
+# plot one species name
+mds.pa.coi.taxloc <- ggplot(coi.scores.taxloc1, aes(x = MDS1, y = MDS2)) +
+  #overlay convex hulls
+  geom_polygon(data = fish.hulls.taxloc, aes(x = MDS1, y = MDS2,
+                                         color = taxloc,
+                                         group = taxloc), fill = "grey69",
+               alpha = 0.1, lty = 1, lwd = 0.1) +
+  # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
+  #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
+  #overlay point
+  geom_point(size = 2, aes(color = taxloc, group = taxloc, shape = location)) +
+  theme_bw() + theme(panel.grid.major = element_blank(), 
+                     panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=10),
+                     axis.text.x = element_text(size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.position = "none")+
+  scale_y_continuous(limits = c(-1.4,1.3), breaks = seq(-1,1,0.5)) +
+  scale_x_continuous(limits = c(-1.1,1.6), breaks = seq(-1,1,0.5)) +
+  scale_color_manual(values = taxcols) +
+  scale_fill_manual(values = taxcols)
+
+mds.pa.coi.taxloc
+
+mds.top3.coi.taxloc <- ggplot(top3coords.taxloc, aes(x = MDS1, y = MDS2)) +
+  geom_segment(mapping = aes(xend = oMDS1, yend = oMDS2), lwd = 0.2, lty = 2) +
+  geom_point(size = 3, shape = 18) +
+    geom_label_repel(aes(label = taxID), size = 2) +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                     panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=10),
+                     axis.text.x = element_text(size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.position = "none") +
+  scale_y_continuous(limits = c(-1.4,1.3), breaks = seq(-1,1,0.5)) +
+  scale_x_continuous(limits = c(-1.1,1.6), breaks = seq(-1,1,0.5)) 
+mds.top3.coi.taxloc
+
+mds.coi.taxloc.vec <- ggarrange(mds.pa.coi.taxloc, mds.top3.coi.taxloc, ncol = 1, nrow = 2)
+
+ggsave("mds.pa.coi.taxloc.pdf", mds.coi.loc.vec, width = 10, height = 8, useDingbats = FALSE)
+# 
+# ### do taxa in Gulf of Oman only
+# coi.sub.tax <- coi.sub %>%
+#     filter(Location == "GoO")
+# 
+# # coi.rra <- coi.sub.tax %>%
+# #   select(-c(Location, Tax)) %>%
+# #   gather(variable, value, -ID.match) %>%
+# #   group_by(ID.match) %>% 
+# #   mutate(percentage = value/sum(value)) %>% 
+# #   select(-value) %>% 
+# #   spread(variable, percentage)
+# 
+# coi.pa.tax <- coi.sub.tax %>%
+#   select(-c(ID.match, Location, Tax)) %>%
+#   mutate_all(funs(case_when(. > 0 ~ 1,
+#                        TRUE ~ 0))) %>%
+#   add_column(ID.match = coi.sub.tax$ID.match) %>%
+#   select(ID.match, everything())
+# 
+# ### run mds
+# coi.mds.tax <- metaMDS(coi.pa.tax[-1], k = 3, trymax = 2000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
+# coi.mds.tax
+# 
+# ###get values and plot in ggplot
+# coi.scores.tax <- as.tibble(coi.mds.tax$points)
+# coi.scores.tax$tax <- coi.sub.tax$Tax
+# coi.scores.tax$location <- coi.sub.tax$Location
+# coi.scores.tax$ID.match <- coi.sub.tax$ID.match
+# 
+# coi.scores.tax1 <- coi.scores.tax %>%
+#   unite("taxloc", c(tax, location), remove = F)
+# 
+# 
+# ###create convex hulls function
+# convex_hull <- function(coi.scores.tax1) coi.scores.tax1[chull(coi.scores.tax1$MDS1, coi.scores.tax1$MDS2),] 
+# 
+# ###run convex hulls on habitats
+# fish.hulls.tax <- ddply(coi.scores.tax, "tax", convex_hull)
+# 
+# # ### set colors
+# taxonlycols <- c("gold2", "olivedrab2", "cyan2", "darkorchid2", "lightpink1", "royalblue2")
+# 
+# ###plot mds results
+# # plot one species name
+# mds.pa.coi.tax <- ggplot(coi.scores.tax1, aes(x = MDS1, y = MDS2)) +
+#   #overlay convex hulls
+#   geom_polygon(data = fish.hulls.tax, aes(x = MDS1, y = MDS2,
+#                                          color = tax,
+#                                          group = tax), fill = "grey69",
+#                alpha = 0.1, lty = 1, lwd = 0.1) +
+#   # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
+#   #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
+#   #overlay point
+#   geom_point(size = 2, aes(color = tax, group = tax), shape = 17) +
+#   theme_bw() + theme(panel.grid.major = element_blank(), 
+#                      panel.grid.minor = element_blank(),
+#                      axis.title = element_text(size=14),
+#                      axis.text.x = element_text(size = 14),
+#                      axis.text.y = element_text(size = 14),
+#                      legend.position = "none") +
+#   #   scale_y_continuous(limits = c(-1.2,1.2), breaks = seq(-1,1,0.5)) +
+#   # scale_x_continuous(limits = c(-1.2,1.4), breaks = seq(-1,1,0.5)) +
+#   scale_color_manual(values = taxonlycols) +
+#   scale_fill_manual(values = taxonlycols)
+
+mds.coi.tax.vec <- ggarrange(mds.pa.coi.tax, mds.top3.coi.taxloc, ncol = 1, nrow = 2)
+
+ggsave("mds.coi.tax.vec", mds.pa.coi.tax, width = 7, height = 10, useDingbats = FALSE)
+
+coi.plots <- ggarrange(mds.coi.loc.vec, mds.coi.taxloc.vec, nrow = 1, ncol = 2)
+coi.plots
+ggsave("mds.coi.vec.pdf", coi.plots, width = 12, height = 12, useDingbats = FALSE)
+
+
+
+###23S data
+seqs23s <- read.csv(file = "UAE_23S.csv") %>%
+  select(-c(UAE18862.1, UAE18400.1))
+#create vector for column names 
+cnames <- as.character(seqs23s$ESV)
+sub23s <- seqs23s %>%
+  #grab columns of fish gut specimens
+  select(., contains("UAE18")) %>%
+  rownames_to_column %>% 
+  gather(var, value, -rowname) %>% 
+  spread(rowname, value) %>%
+  set_colnames(c("ID.match", cnames)) %>%
+  join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
+  select(ID.match, Location, Tax, everything()) %>% 
+  mutate(rowsum = rowSums(.[4:3009]))
+
+sub23s.loc <- sub23s %>%
+  filter(Tax %in% c("ENNEVENT", "CORYANOM", "ECSEPULC"))
+
+# coi.rra <- coi.sub.tax %>%
+#   select(-c(Location, Tax)) %>%
+#   gather(variable, value, -ID.match) %>%
+#   group_by(ID.match) %>% 
+#   mutate(percentage = value/sum(value)) %>% 
+#   select(-value) %>% 
+#   spread(variable, percentage)
+# 
+
+
+pa23s.loc <- sub23s.loc %>%
+  select(-c(ID.match, Location, Tax)) %>%
+  mutate_all(funs(case_when(. > 0 ~ 1,
+                       TRUE ~ 0))) %>%
+  add_column(ID.match = sub23s.loc$ID.match) %>%
+  select(ID.match, everything())
+
+### run mds
+mds23s.loc <- metaMDS(pa23s.loc[-1], k = 3, trymax = 1000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
+
+###get values and plot in ggplot
+scores23s.loc <- as.tibble(mds23s.loc$points)
+scores23s.loc$tax <- sub23s.loc$Tax
+scores23s.loc$location <- sub23s.loc$Location
+scores23s.loc$ID.match <- sub23s.loc$ID.match
+
+scores23s.loc1 <- scores23s.loc %>%
+  unite("taxloc", c(tax, location), remove = F)
+
+
+###do permanova
+perm.23.loc <- adonis(pa23s.loc[-1] ~ location * tax, data = scores23s.loc1)
+perm.23.loc
+
+###do simper
+pa.sim.23s.loc <- as.list(simper(pa23s.loc[-1], scores23s.loc1$taxloc))
+simsum.23sloc <- summary(pa.sim.23s.loc)
+top3.23s.loc<-lapply(simsum.23sloc, `[`,1,)
+esvnames <- ldply(lapply(top3.23s.loc, rownames)) %>%
+  gather("comparison", "ESV", V1) %>%
+  arrange(.id)
+
+top3long.23s.loc <- plyr::ldply(top3.23s.loc, data.frame) %>%
+  arrange(.id) %>%
+  select(.id) %>%
+  add_column(ESV = esvnames$ESV)
+
+ESVcoords.23s.loc <- as.data.frame(mds23s.loc$species) %>%
+  add_column(ESV = rownames(.))
+
+ESVtax <- seqs23s[c(1:9)]
+
+top3coords.23s.loc <- top3long.23s.loc %>%
+  left_join(ESVcoords.23s.loc, by = "ESV") %>%
+  left_join(ESVtax, by = "ESV") %>%
+  mutate(taxID = case_when(id >= 97 ~ paste(Phylum, Order, Species, sep = " | "),
+                           id >= 95 ~ paste(Phylum, Order, sep = " | "),
+                           id >= 85 ~ paste(Phylum, Order, sep = " | "),
+                           id >= 75 ~ paste(Phylum),
+                           id < 75 ~ "Unidentified")) %>%
+  mutate(oMDS1 = 0,
+         oMDS2 = 0) %>%
+  select(-.id) %>%
+  distinct(taxID, MDS1, MDS2, oMDS1, oMDS2) 
+
+
+###create convex hulls function
+convex_hull <- function(scores23s.loc1) scores23s.loc1[chull(scores23s.loc1$MDS1, scores23s.loc1$MDS2),] 
+
+###run convex hulls on habitats
+fish.hulls23s.loc <- ddply(scores23s.loc1, "taxloc", convex_hull)
+
+# ### set colors
+taxloccols <- c("olivedrab4", "olivedrab2", "cyan4", "cyan2", "darkorchid4", "darkorchid2")
+
+###plot mds results
+# plot one species name
+mds.pa.23s.loc <- ggplot(scores23s.loc1, aes(x = MDS1, y = MDS2)) +
+  #overlay convex hulls
+  geom_polygon(data = fish.hulls23s.loc, aes(x = MDS1, y = MDS2,
+                                         color = taxloc,
+                                         group = taxloc), fill = "grey69",
+               alpha = 0.1, lty = 1, lwd = 0.1) +
+  # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
+  #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
+  #overlay point
+  geom_point(size = 2, aes(color = taxloc, group = taxloc, shape = location)) +
+  theme_bw() + theme(panel.grid.major = element_blank(), 
+                     panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=10),
+                     axis.text.x = element_text(size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.position = "none") +
+  scale_y_continuous(limits = c(-2.5,1.2), breaks = seq(-2,1,0.5)) +
+  scale_x_continuous(limits = c(-1.8,1.2), breaks = seq(-2,1,0.5)) +
+  scale_color_manual(values = taxloccols) +
+  scale_fill_manual(values = taxloccols)
+
+mds.pa.23s.loc
+ggsave("mds.pa.23s.loc.pdf", mds.pa.23s.loc, width = 10, height = 8, useDingbats = FALSE)
+
+mds.top3.23s.loc <- ggplot(top3coords.23s.loc, aes(x = MDS1, y = MDS2)) +
+  geom_segment(mapping = aes(xend = oMDS1, yend = oMDS2), lwd = 0.2, lty = 2) +
+  geom_point(size = 3, shape = 18) +
+    geom_label_repel(aes(label = taxID), size = 1.5, segment.size = 0.2) +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                     panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=10),
+                     axis.text.x = element_text(size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.position = "none") + 
+  scale_y_continuous(limits = c(-2.5,1.2), breaks = seq(-2,1,0.5)) +
+  scale_x_continuous(limits = c(-1.8,1.2), breaks = seq(-2,1,0.5))
+mds.top3.23s.loc
+
+mds.23s.loc.vec <- ggarrange(mds.pa.23s.loc, mds.top3.23s.loc, ncol = 1, nrow = 2)
+mds.23s.loc.vec
+ggsave("mds.23s.loc.vec.pdf", mds.23s.loc.vec, width = 7, height = 10, useDingbats = FALSE)
+
+
+
+
+### try bringing in the other taxa
+sub23s.taxloc <- sub23s 
+
+pa23s.taxloc <- sub23s.taxloc %>%
+  select(-c(ID.match, Location, Tax)) %>%
+  mutate_all(funs(case_when(. > 0 ~ 1,
+                       TRUE ~ 0))) %>%
+  add_column(ID.match = sub23s.taxloc$ID.match) %>%
+  select(ID.match, everything())
+
+### run mds
+mds23s.taxloc <- metaMDS(pa23s.taxloc[-1], k = 3, trymax = 1000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
+
+###get values and plot in ggplot
+scores23s.taxloc <- as.tibble(mds23s.taxloc$points)
+scores23s.taxloc$tax <- sub23s.taxloc$Tax
+scores23s.taxloc$location <- sub23s.taxloc$Location
+scores23s.taxloc$ID.match <- sub23s.taxloc$ID.match
+
+scores23s1.taxloc <- scores23s.taxloc %>%
+   unite("taxloc", c(tax, location), remove = F)
+
+###do permanova
+perm.23.taxloc <- adonis(pa23s.taxloc[-1] ~ location * tax, data = scores23s1.taxloc)
+perm.23.taxloc
+
+###do simper
+pa.sim.23s.taxloc <- as.list(simper(pa23s.taxloc[-1], scores23s1.taxloc$taxloc))
+simsum.23staxloc <- summary(pa.sim.23s.taxloc)
+top3.23s.taxloc<-lapply(simsum.23staxloc, `[`,1,)
+esvnames <- ldply(lapply(top3.23s.taxloc, rownames)) %>%
+  gather("comparison", "ESV", V1) %>%
+  arrange(.id)
+
+top3long.23s.taxloc <- plyr::ldply(top3.23s.taxloc, data.frame) %>%
+  arrange(.id) %>%
+  select(.id) %>%
+  add_column(ESV = esvnames$ESV)
+
+ESVcoords.23s.taxloc <- as.data.frame(mds23s.taxloc$species) %>%
+  add_column(ESV = rownames(.))
+
+ESVtax <- seqs23s[c(1:9)]
+
+top3coords.23s.taxloc <- top3long.23s.taxloc %>%
+  left_join(ESVcoords.23s.taxloc, by = "ESV") %>%
+  left_join(ESVtax, by = "ESV") %>%
+  mutate(taxID = case_when(id >= 97 ~ paste(Phylum, Order, Species, sep = " | "),
+                           id >= 95 ~ paste(Phylum, Order, sep = " | "),
+                           id >= 85 ~ paste(Phylum, Order, sep = " | "),
+                           id >= 75 ~ paste(Phylum),
+                           id < 75 ~ "Unidentified")) %>%
+  mutate(oMDS1 = 0,
+         oMDS2 = 0) %>%
+  select(-.id) %>%
+  distinct(taxID, MDS1, MDS2, oMDS1, oMDS2) 
+
+
+
+###create convex hulls function
+convex_hull <- function(scores23s1.taxloc) scores23s1.taxloc[chull(scores23s1.taxloc$MDS1, scores23s1.taxloc$MDS2),] 
+
+###run convex hulls on habitats
+fish.hulls23s.taxloc <- ddply(scores23s1.taxloc, "taxloc", convex_hull)
+
+# ### set colors
+taxcols <- c("gold2", "olivedrab4", "olivedrab2", "cyan4", "cyan2", "darkorchid4", "darkorchid2", "lightpink1", "royalblue2")
+
+###plot mds results
+# plot one species name
+mds.pa.23s.taxloc <- ggplot(scores23s1.taxloc, aes(x = MDS1, y = MDS2)) +
+  #overlay convex hulls
+  geom_polygon(data = fish.hulls23s.taxloc, aes(x = MDS1, y = MDS2,
+                                         color = taxloc,
+                                         group = taxloc), fill = "grey69",
+               alpha = 0.1, lty = 1, lwd = 0.1) +
+  # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
+  #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
+  #overlay point
+  geom_point(size = 2, aes(color = taxloc, group = taxloc, shape = location)) +
+  theme_bw() + theme(panel.grid.major = element_blank(), 
+                     panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=10),
+                     axis.text.x = element_text(size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.position = "none") +
+  scale_y_continuous(limits = c(-2.1,1.3), breaks = seq(-2,1,0.5)) +
+  scale_x_continuous(limits = c(-2.3,1), breaks = seq(-2,1,0.5)) +
+  scale_color_manual(values = taxcols) +
+  scale_fill_manual(values = taxcols)
+
+mds.pa.23s.taxloc
+ggsave("mds.pa.23s.taxloc.pdf", mds.pa.23s.taxloc, width = 10, height = 8, useDingbats = FALSE)
+
+
+mds.top3.23s.taxloc <- ggplot(top3coords.23s.taxloc, aes(x = MDS1, y = MDS2)) +
+  geom_segment(mapping = aes(xend = oMDS1, yend = oMDS2), lwd = 0.2, lty = 2) +
+  geom_point(size = 3, shape = 18) +
+    geom_label_repel(aes(label = taxID), size = 1.5, segment.size = 0.2) +
+    theme_bw() + theme(panel.grid.major = element_blank(), 
+                     panel.grid.minor = element_blank(),
+                     axis.title = element_text(size=10),
+                     axis.text.x = element_text(size = 10),
+                     axis.text.y = element_text(size = 10),
+                     legend.position = "none") +
+  scale_y_continuous(limits = c(-2.1,1.3), breaks = seq(-2,1,0.5)) +
+  scale_x_continuous(limits = c(-2.3,1), breaks = seq(-2,1,0.5)) 
+mds.top3.23s.taxloc
+
+mds.23s.taxloc.vec <- ggarrange(mds.pa.23s.taxloc, mds.top3.23s.taxloc, ncol = 1, nrow = 2)
+mds.23s.taxloc.vec
+ggsave("mds.23s.loc.vec.pdf", mds.23s.loc.vec, width = 7, height = 10, useDingbats = FALSE)
+
+plots23s <- ggarrange(mds.23s.loc.vec, mds.23s.taxloc.vec, nrow = 1, ncol = 2)
+
+ggsave("plots23svectors.pdf", plots23s, width = 12, height = 12, useDingbats = FALSE)
+
+############
+### do taxa in GoO only
+# sub23s.tax <- sub23s %>%
+#   filter(Location == "GoO")
+# 
+# pa23s.tax <- sub23s.tax %>%
+#   select(-c(ID.match, Location, Tax)) %>%
+#   mutate_all(funs(case_when(. > 0 ~ 1,
+#                        TRUE ~ 0))) %>%
+#   add_column(ID.match = sub23s.tax$ID.match) %>%
+#   select(ID.match, everything())
+# 
+# ### run mds
+# mds23s.tax <- metaMDS(pa23s.tax[-1], k = 3, trymax = 1000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
+# 
+# ###get values and plot in ggplot
+# scores23s.tax <- as.tibble(mds23s.tax$points)
+# scores23s.tax$tax <- sub23s.tax$Tax
+# scores23s.tax$location <- sub23s.tax$Location
+# scores23s.tax$ID.match <- sub23s.tax$ID.match
+# 
+# scores23s1.tax <- scores23s.tax %>%
+#    unite("taxloc", c(tax, location), remove = F)
+# 
+# 
+# ###create convex hulls function
+# convex_hull <- function(scores23s1.tax) scores23s1.tax[chull(scores23s1.tax$MDS1, scores23s1.tax$MDS2),] 
+# 
+# ###run convex hulls on habitats
+# fish.hulls23s.tax <- ddply(scores23s1.tax, "tax", convex_hull)
+# 
+# # ### set colors
+# taxonlycols <- c("gold2", "olivedrab2", "cyan2", "darkorchid2", "lightpink1", "royalblue2")
+# 
+# ###plot mds results
+# # plot one species name
+# mds.pa.23s.tax <- ggplot(scores23s1.tax, aes(x = MDS1, y = MDS2)) +
+#   #overlay convex hulls
+#   geom_polygon(data = fish.hulls23s.tax, aes(x = MDS1, y = MDS2,
+#                                          color = tax,
+#                                          group = tax), fill = "grey69",
+#                alpha = 0.1, lty = 1, lwd = 0.1) +
+#   # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
+#   #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
+#   #overlay point
+#   geom_point(size = 2, aes(color = tax, group = tax), shape = 17) +
+#   theme_bw() + theme(panel.grid.major = element_blank(), 
+#                      panel.grid.minor = element_blank(),
+#                      axis.title = element_text(size=10),
+#                      axis.text.x = element_text(size = 10),
+#                      axis.text.y = element_text(size = 10),
+#                      legend.position = "none") +
+#   #   scale_y_continuous(limits = c(-1.2,1.2), breaks = seq(-1,1,0.5)) +
+#   # scale_x_continuous(limits = c(-1.2,1.4), breaks = seq(-1,1,0.5)) +
+#   scale_color_manual(values = taxonlycols) +
+#   scale_fill_manual(values = taxonlycols)
+# 
+# mds.pa.23s.tax
+# ggsave("mds.pa.23s.tax.pdf", mds.pa.23s.tax, width = 10, height = 8, useDingbats = FALSE)
+# 
+# plots23s <- ggarrange(mds.pa.23s.loc, mds.pa.23s.taxloc, mds.pa.23s.tax, nrow = 1, ncol = 3)
+# plots23s
+# 
+# ggsave("plots23s.pdf", plots23s, width = 10, height = 8, useDingbats = FALSE)
 ```
 
 
