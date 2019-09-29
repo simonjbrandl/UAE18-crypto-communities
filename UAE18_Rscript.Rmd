@@ -7,11 +7,11 @@ editor_options:
   chunk_output_type: console
 ---
 
-```{r setup, include=FALSE}
+```{r SETUP, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r LOAD PACKAGES}
 #load packages
 library(plyr)
 library(dplyr)
@@ -28,7 +28,7 @@ library(fishualize)
 library(modelr)
 ```
 
-```{r}
+```{r LOAD DATASETS}
 #load datasets
 comms <- read.csv(file = "Data/UAE18_RawData_Comms.csv")
 ctdat <- read.csv(file = "Data/UAE_CT.csv")
@@ -44,7 +44,7 @@ ctmax <- subset(ctdat, ctdat$Ctmax != "NA")
 ctmin <- subset(ctdat, ctdat$Ctmin != "NA")
 ```
 
-```{r pressure, echo=FALSE}
+```{r COMMUNITY STRUCTURE: ABUNDANCE, BIOMASS, DIVERSITY}
 #start with community analyses
 # 1. compare abundance, biomass, diversity
 # 2. compare community composition
@@ -172,11 +172,9 @@ ggsave("Plots/divpred.pdf", div.pred.plot, width = 8, height = 4, useDingbats = 
 Fig1 <- ggarrange(abu.pred.plot, bio.pred.plot, div.pred.plot, nrow = 3)
 
 ggsave("Plots/Fig1ABC.pdf", Fig1, width = 8, height = 12, useDingbats = F)
+```
 
-#################################
-# 2. Communuity composition
-# create variable of 1s for count
-##################################
+``` {r COMMUNITY COMPOSITION: NMDS}
 comms$count = 1
 comms_wide <- comms %>% 
   group_by(Location, Site, Sitenumber, Genspe) %>%
@@ -242,10 +240,9 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
 
 comp_plot
 ggsave("Plots/comp_plot.pdf", plot = comp_plot, width = 8, height = 6, useDingbats=FALSE)
+```
 
-########################$
-###check size structure
-#########################
+``` {r SIZE: E. ventermaculis and C. anomalus}
 table(comms$Tax, comms$Location)
 size.strs.event <- comms %>%
   filter(Tax %in% c("ENNEVENT")) 
@@ -292,71 +289,12 @@ canom.plot
 Fig3 <- ggarrange(event.plot, canom.plot, ncol = 1, nrow = 2)
 ggsave("Plots/Fig3.pdf", Fig3, width = 4, height = 7, useDingbats = F)
 ###comp abundance of three species in AG & GoO
-
-comp.abu <- comms %>%
-  filter(Tax %in% c("ENNEVENT", "CORYANOM", "ECSEPULC")) 
-# radius first (2*curved surface length/2*pi)
-comp.abu$radius <- (2*comp.abu$Dimension)/(2*pi)
-# surface area (4*pi*radius^2)/2 and divide by 10000 for square meters
-comp.abu$SA <- ((4*pi*comp.abu$radius^2)/2)/10000
-
-library(dplyr)
-
-metadat <- comp.abu %>%
-  group_by(Location, Sitename, Site) %>%
-  summarize(SA = mean(SA))
-###get biomass and diversity estimates for Arabian Gulf and Gulf of Oman
-comp.abu.means <- comp.abu %>%
-  group_by(Sitename, Genspe) %>% 
-  summarize(Biomass = sum(W), Abundance = n()) %>%
-  ungroup() %>%
-  complete(Sitename, Genspe,fill=list(n=0)) %>%
-  replace_na(list(Biomass = 0, Abundance = 0)) %>%
-  left_join(metadat, by = "Sitename") %>%
-  mutate(density = Abundance/SA,
-         biomassm2 = Biomass/SA) %>%
-  mutate(Tax = as.factor(Genspe))
-
-# plot density data
-density_plot_comp <- ggplot(comp.abu.means, aes(x = Location, y = density, color = Location))+
-  geom_jitter(aes(fill = Location), alpha = 0.5, width = 0.1, color = "black", shape = 23, size = 3) +
-  stat_summary(fun.data = "mean_cl_boot", size = 1) +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                       panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=14),
-                     axis.text.x = element_text(size = 14),
-                     axis.text.y = element_text(size = 14),
-                     legend.position="none") +
-  scale_color_manual(values = c("forestgreen", "gray5")) +
-  scale_fill_manual(values = c("forestgreen", "gray5")) +
-  scale_y_continuous(limits = c(-0.01, 16), breaks = seq(0,16,2))+
-  facet_wrap(. ~ Tax)
-
-density_plot_comp
-ggsave("density_comparisons.pdf", density_plot_comp, width = 8, height = 4, useDingbats = FALSE)
-
-biomass_plot_comp <- ggplot(comp.abu.means, aes(x = Location, y = biomassm2, color = Location))+
-  geom_jitter(aes(fill = Location), alpha = 0.5, width = 0.1, color = "black", shape = 23, size = 3) +
-  stat_summary(fun.data = "mean_cl_boot", size = 1) +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                       panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=14),
-                     axis.text.x = element_text(size = 14),
-                     axis.text.y = element_text(size = 14),
-                     legend.position="none") +
-  scale_color_manual(values = c("forestgreen", "gray5")) +
-  scale_fill_manual(values = c("forestgreen", "gray5")) +
-  scale_y_continuous(limits = c(-0.01, 9), breaks = seq(0,9,3))+
-  facet_wrap(. ~ Tax)
-
-biomass_plot_comp
-ggsave("density_comparisons.pdf", density_plot_comp, width = 8, height = 4, useDingbats = FALSE)
 ```
 
-``` {r}
+``` {r PHYSIOLOGY: CTmax and CTmin}
 # ct max and ctmin
 ctmax
-ctmaxmod <- lm(Ctmax ~ Distribution, data = ctmax)
+ctmaxmod <- lm(Ctmax ~ mass + Tax , data = ctmax)
 summary(ctmaxmod)
 ctmax_sum <- ctmax %>% group_by(Distribution) %>% summarize(mean = mean(Ctmax), sd = sd(Ctmax), n = n()) %>%
   mutate(se = sd / sqrt(n),
