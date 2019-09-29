@@ -22,12 +22,15 @@ library(lme4)
 library(ggpubr)
 library(ggrepel)
 library(colorRamps)
+library(tidybayes)
+library(brms)
+library(fishualize)
 ```
 
 ```{r}
 #load datasets
-comms <- read.csv(file = "UAE18_RawData_Comms.csv")
-ctdat <- read.csv(file = "UAE_CT.csv")
+comms <- read.csv(file = "Data/UAE18_RawData_Comms.csv")
+ctdat <- read.csv(file = "Data/UAE_CT.csv")
 comms$Genspe <- paste(substr(comms$Genus, 0,3), comms$Species, sep = ". ")
 ctdat$Genspe <- paste(substr(ctdat$Genus, 0,3), ctdat$Species, sep = ". ")
 ctdat <- ctdat %>% mutate(Distribution = case_when(Tax == "ECSEPULC" ~ "AG+GoM",
@@ -51,70 +54,128 @@ comms$radius <- (2*comms$Dimension)/(2*pi)
 comms$SA <- ((4*pi*comms$radius^2)/2)/10000
 
 ###get biomass and diversity estimates for Arabian Gulf and Gulf of Oman
-comm_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summarize(Biomass = sum(W), Abundance = n(), Speciesrichness = length(unique(Genspe)), SA = mean(SA))
-comm_means$Density <- comm_means$Abundance/comm_means$SA
-comm_means$Biomass_per_m2 <- comm_means$Biomass/comm_means$SA
-
+comm_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summarize(Biomass = sum(W), Abundance = n(), Speciesrichness = length(unique(Genspe)), SA = mean(SA)) %>%
+  mutate(Density = Abundance/SA,
+         Biomass_per_m2 = Biomass/SA,
+         Species_density = Speciesrichness/SA,
+         site_intercepts = case_when(Site == "Dhabiya" ~ 1.90,
+                                     Site == "RasGhanada" ~ 1.80,
+                                     Site == "Saadiyat" ~ 1.70,
+                                     Site == "Dibba" ~ 0.9,
+                                     Site == "SharmRock" ~ 0.80,
+                                     Site == "Snoopy" ~ 0.70),
+         site_reord = factor(Site, levels = sort(levels(comm_means$site_intercepts))))
 
 
 #run GLM with abundance data and offset for surface area sampled
-# abundance.model <- glmer.nb()
+abundance.model <- brm(Abundance ~ Location + (1|SA), 
+                            data = comm_means, family = negbinomial, control = list(adapt_delta = 0.999, max_treedepth = 15))
+summary(abundance.model)
+abu.pred <- comm_means %>%
+  data_grid(Location, SA) %>%
+  add_predicted_draws(abundance.model) %>%
+  mutate(pred.density = .prediction/SA)
 
-# plot density data
-density_plot <- ggplot(comm_means, aes(x = Location, y = Density, color = Location))+
-  geom_jitter(aes(fill = Location), alpha = 0.5, width = 0.1, color = "black", shape = 23, size = 3) +
-  stat_summary(fun.data = "mean_cl_boot", size = 1) +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                       panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=14),
-                     axis.text.x = element_text(size = 14),
-                     axis.text.y = element_text(size = 14),
-                     legend.position="none") +
-  scale_color_manual(values = c("forestgreen", "gray5")) +
-  scale_fill_manual(values = c("forestgreen", "gray5")) +
-  scale_y_continuous(limits = c(0, 45), breaks = seq(0,45,5))+
-  xlab(NULL)
-density_plot
 
-# plot species richness data
-speciesrichnessplot <- ggplot(comm_means, aes(x = Location, y = Speciesrichness, color = Location))+
-  geom_jitter(aes(fill = Location), alpha = 0.5, width = 0.1, color = "black", shape = 23, size = 3) +
-  stat_summary(fun.data = "mean_cl_boot", size = 1) +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                       panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=14),
-                     axis.text.x = element_text(size = 14),
-                     axis.text.y = element_text(size = 14),
-                     legend.position="none") +
-  scale_color_manual(values = c("forestgreen", "gray5")) +
-  scale_fill_manual(values = c("forestgreen", "gray5")) +
-  scale_y_continuous(limits = c(0, 30), breaks = seq(0,30,5))+
-  xlab(NULL)
-speciesrichnessplot
+abu.pred.plot <- ggplot(data = abu.pred) +
+  geom_halfeyeh(aes(y = rev(Location), x = pred.density, fill = Location)) +
+  geom_jitter(aes(x = Density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
+             data = comm_means, height = 0.02, 
+             alpha = 0.5, size = 2) +
+  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.5)) +
+  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
+  scale_x_log10(limits = c(0.1,5e2), breaks=c(0,0.1,1,10,100), labels=c(0,0.1,1,10,100)) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = "top") +
+  guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  xlab(expression(paste("Density of cryptobenthic fishes (individuals ", m^{-2},")")))
+abu.pred.plot
 
-# plot species richness data
-biomassplot <- ggplot(comm_means, aes(x = Location, y = Biomass_per_m2, color = Location))+
-  geom_jitter(aes(fill = Location), alpha = 0.5, width = 0.1, color = "black", shape = 23, size = 3) +
-  stat_summary(fun.data = "mean_cl_boot", size = 1) +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                       panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=14),
-                     axis.text.x = element_text(size = 14),
-                     axis.text.y = element_text(size = 14),
-                     legend.position="none") +
-  scale_color_manual(values = c("forestgreen", "gray5")) +
-  scale_fill_manual(values = c("forestgreen", "gray5")) +
-  scale_y_continuous(limits = c(0, 35), breaks = seq(0,35,5)) +
-  xlab(NULL)
-biomassplot
+ggsave("Plots/abupred.pdf", abu.pred.plot, width = 8, height = 4, useDingbats = F)
 
-# stitch three plots together
-comm_plots <- ggarrange(speciesrichnessplot, density_plot, biomassplot, nrow = 3, ncol = 1)
-comm_plots
-ggsave("comm_plots.pdf", plot = comm_plots, width = 3, height = 8)
 
+###############biomass
+
+#run GLM with abundance data and offset for surface area sampled
+biomass.model <- brm(Biomass ~ Location + (1|SA), 
+                            data = comm_means, family = Gamma(link = "log"), 
+                     control = list(adapt_delta = 0.9999, max_treedepth = 15))
+summary(biomass.model)
+bio.pred <- comm_means %>%
+  data_grid(Location, SA) %>%
+  add_predicted_draws(biomass.model) %>%
+  mutate(pred.biomass = .prediction/SA)
+
+
+bio.pred.plot <- ggplot(data = bio.pred) +
+  geom_halfeyeh(aes(y = rev(Location), x = pred.biomass, fill = Location)) +
+  geom_jitter(aes(x = Biomass_per_m2, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
+             data = comm_means, height = 0.02, 
+             alpha = 0.5, size = 2) +
+  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.5)) +
+  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
+  scale_x_log10(limits = c(0.1,5e2), breaks=c(0,0.1,1,10,100), labels=c(0,0.1,1,10,100)) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = "top") +
+  guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  xlab(expression(paste("Biomass of cryptobenthic fishes (grams ", m^{-2},")")))
+bio.pred.plot
+
+ggsave("Plots/biopred.pdf", bio.pred.plot, width = 8, height = 4, useDingbats = F)
+
+
+###############biomass
+
+#run GLM with abundance data and offset for surface area sampled
+diversity.model <- brm(Speciesrichness ~ Location + (1|SA), 
+                            data = comm_means, family = poisson(link = "log"), thin = 50, iter = 15000,
+                     control = list(adapt_delta = 0.999, max_treedepth = 15))
+summary(diversity.model)
+div.pred <- comm_means %>%
+  data_grid(Location, SA) %>%
+  add_predicted_draws(diversity.model) %>%
+  mutate(pred.diversity = .prediction/SA)
+
+
+div.pred.plot <- ggplot(data = div.pred) +
+  geom_halfeyeh(aes(y = rev(Location), x = pred.diversity, fill = Location)) +
+  geom_jitter(aes(x = Species_density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
+             data = comm_means, height = 0.02, 
+             alpha = 0.5, size = 2) +
+  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.5)) +
+  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
+  scale_x_log10(limits = c(0.1,1e2), breaks=c(0,0.1,1,10,100), labels=c(0,0.1,1,10,100)) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = "top") +
+  guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  xlab(expression(paste("Species richness of cryptobenthic fishes (species ", m^{-2},")")))
+div.pred.plot
+
+ggsave("Plots/divpred.pdf", div.pred.plot, width = 8, height = 4, useDingbats = F)
+
+Fig1 <- ggarrange(abu.pred.plot, bio.pred.plot, div.pred.plot, nrow = 3)
+
+ggsave("Plots/Fig1ABC.pdf", Fig1, width = 8, height = 12, useDingbats = F)
+
+#################################
 # 2. Communuity composition
 # create variable of 1s for count
+##################################
 comms$count = 1
 comms_wide <- comms %>% 
   group_by(Location, Site, Sitenumber, Genspe) %>%
@@ -122,16 +183,33 @@ comms_wide <- comms %>%
   spread(Genspe, totaln, fill = 0) 
 
 ###run MDS
-comp_mds <- metaMDS(comms_wide[-c(1:3)], k = 2, metric = "bray", trymax = 1000)
+comp_mds <- metaMDS(comms_wide[-c(1:3)], metric = "bray", trymax = 1000)
 comp_mds
 ###get values and plot in ggplot
-site.scores <- as.tibble(scores(comp_mds))
-site.scores$Location <- comms_wide$Location
-site.scores$Site <- comms_wide$Site
-site.scores$Sitenumber <- comms_wide$Sitenumber
-site.scores <- site.scores %>% inner_join(comm_means)
+site.scores <- as.tibble(scores(comp_mds)) %>%
+  mutate(Location = comms_wide$Location,
+         Site = comms_wide$Site,
+         Sitenumber = comms_wide$Sitenumber) %>% 
+  inner_join(comm_means)
 
 
+
+# mds.points <- as.data.frame(scores(comp_mds, "species")) %>%
+#   add_column(Genspe = rownames(.))
+# 
+# genspeabu <- comms %>%
+#   group_by(Genspe, Family) %>%
+#   summarize(count = n()) %>%
+#   inner_join(mds.points)
+# 
+# point.plot <- ggplot(genspeabu) +
+#   theme_bw() +
+#   geom_segment(aes(x=0, xend=NMDS1, y=0, yend=NMDS2, color = Family),
+#                arrow = arrow(length = unit(0.1, "cm")),
+#                inherit.aes = F) +
+#   geom_text_repel(aes(x=NMDS1, NMDS2, label=Genspe), size=2, inherit.aes = F) +
+#   scale_color_fish(discrete=TRUE, option = "Valenciennea_strigata")
+# point.plot
 ###create convex hulls function
 convex_hull <- function(site.scores) site.scores[chull(site.scores$NMDS1, site.scores$NMDS2),] 
 
@@ -152,15 +230,17 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
                alpha = 0.4, lty = 1, lwd = 0.1, color = "black") +
   #overlay points
   geom_point(aes(color = Location, group = Location, fill = Location,
-                             shape = Site, size = Speciesrichness)) +
+                             shape = reorder(Site, sort(as.numeric(site_intercepts))))) +
   theme_bw()+
   theme(legend.position = "right") +
-  scale_color_manual(values = c("forestgreen", "gray5")) +
-  scale_fill_manual(values = c("forestgreen", "gray5")) +
-  scale_shape_manual(values = c(8, 21:25))
+  scale_color_fish(discrete=TRUE, option = "Coris_gaimard") +
+  scale_fill_fish(discrete=TRUE, option = "Coris_gaimard") +
+  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
+    guides(fill = guide_legend(ncol = 1),
+         shape = guide_legend(ncol = 1))
 
 comp_plot
-ggsave("comp_plot.pdf", plot = comp_plot, width = 7, height = 5, useDingbats=FALSE)
+ggsave("Plots/comp_plot.pdf", plot = comp_plot, width = 8, height = 6, useDingbats=FALSE)
 
 ###check size structure
 
@@ -169,10 +249,10 @@ size.strs <- comms %>%
 table(size.strs$Tax, size.strs$Location)
 
 size_str_plot <- ggplot(size.strs, aes(x = Location, y = W, fill = Location)) +
-  geom_boxplot(notch = F)+
+  stat_halfeyeh() +
   facet_grid(.~Tax) +
-  scale_color_manual(values = c("forestgreen", "gray5")) +
-  scale_fill_manual(values = c("forestgreen", "gray5")) +
+  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  scale_fill_manual(values = c("dodgerblue4", "mediumaquamarine")) +
   ylab("Weight in grams") +
   theme_bw() + theme(legend.position="none")
 size_str_plot
