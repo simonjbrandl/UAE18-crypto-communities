@@ -25,6 +25,7 @@ library(colorRamps)
 library(tidybayes)
 library(brms)
 library(fishualize)
+library(modelr)
 ```
 
 ```{r}
@@ -64,7 +65,7 @@ comm_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summa
                                      Site == "Dibba" ~ 0.9,
                                      Site == "SharmRock" ~ 0.80,
                                      Site == "Snoopy" ~ 0.70),
-         site_reord = factor(Site, levels = sort(levels(comm_means$site_intercepts))))
+         site_reord = factor(Site, levels = sort(levels(site_intercepts))))
 
 
 #run GLM with abundance data and offset for surface area sampled
@@ -233,8 +234,8 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
                              shape = reorder(Site, sort(as.numeric(site_intercepts))))) +
   theme_bw()+
   theme(legend.position = "right") +
-  scale_color_fish(discrete=TRUE, option = "Coris_gaimard") +
-  scale_fill_fish(discrete=TRUE, option = "Coris_gaimard") +
+  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  scale_fill_manual(values = c("dodgerblue4", "mediumaquamarine")) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
     guides(fill = guide_legend(ncol = 1),
          shape = guide_legend(ncol = 1))
@@ -242,24 +243,54 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
 comp_plot
 ggsave("Plots/comp_plot.pdf", plot = comp_plot, width = 8, height = 6, useDingbats=FALSE)
 
+########################$
 ###check size structure
-
-size.strs <- comms %>%
+#########################
+table(comms$Tax, comms$Location)
+size.strs.event <- comms %>%
   filter(Tax %in% c("ENNEVENT")) 
-table(size.strs$Tax, size.strs$Location)
 
-size_str_plot <- ggplot(size.strs, aes(x = Location, y = W, fill = Location)) +
-  stat_halfeyeh() +
-  facet_grid(.~Tax) +
+size.model.event <- brm(W ~ (TL + Location), data = size.strs.event, family = Gamma(link = "log"))
+summary(size.model.event)
+
+size.preds.event <- size.strs.event %>%
+  group_by(Location) %>%  
+  data_grid(TL = seq_range(TL, n = 100)) %>%
+  add_fitted_draws(size.model.event, n = 500)
+
+event.plot <- ggplot(size.preds.event, aes(x = TL, y = W, color = ordered(Location))) +
+  geom_line(aes(y = .value, group = paste(Location, .draw)), alpha = .3, lwd = 0.1) +
+  geom_point(data = size.strs.event, aes(fill = Location), alpha = 0.5, size = 0.8, shape = 23, color = "black") +
   scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
   scale_fill_manual(values = c("dodgerblue4", "mediumaquamarine")) +
-  ylab("Weight in grams") +
-  theme_bw() + theme(legend.position="none")
-size_str_plot
-ggsave("Eventermaculus_size.pdf", size_str_plot, width = 4, height = 4, useDingbats = F)
-mod <- lm(log(W) ~ Tax*Location, data = size.strs)
-summary(mod)
+  ylab("body weight in g") +
+  xlab("total length (TL) in mm") +
+  theme_bw() +
+  theme(legend.position = "none")
+event.plot
+size.strs.canom <- comms %>%
+  filter(Tax %in% c("CORYANOM")) 
 
+size.model.canom <- brm(W ~ (TL + Location), data = size.strs.canom, family = Gamma(link = "log"))
+summary(size.model.canom)
+
+size.preds.canom <- size.strs.canom %>%
+  group_by(Location) %>%  
+  data_grid(TL = seq_range(TL, n = 100)) %>%
+  add_fitted_draws(size.model.canom, n = 500)
+
+canom.plot <- ggplot(size.preds.canom, aes(x = TL, y = W, color = ordered(Location))) +
+  geom_line(aes(y = .value, group = paste(Location, .draw)), alpha = .3, lwd = 0.1) +
+  geom_point(data = size.strs.canom, aes(fill = Location), size = 0.8, alpha = 0.5, shape = 23, color = "black") +
+  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  scale_fill_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  ylab("body weight in g") +
+  xlab("total length (TL) in mm") +
+  theme_bw() +
+  theme(legend.position = "none")
+canom.plot
+Fig3 <- ggarrange(event.plot, canom.plot, ncol = 1, nrow = 2)
+ggsave("Plots/Fig3.pdf", Fig3, width = 4, height = 7, useDingbats = F)
 ###comp abundance of three species in AG & GoO
 
 comp.abu <- comms %>%
