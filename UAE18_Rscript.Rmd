@@ -299,7 +299,8 @@ table(ctmax$Location, ctmax$Tax)
 table(ctmin$Location, ctmin$Tax)
 
 
-maxmod <- brm(Ctmax ~ (Location + Tax + Location:Tax), data = ctmax,  control = list(adapt_delta = 0.95, max_treedepth = 12), iter = 5000)
+maxmod <- brm(Ctmax ~ (Location + Tax + Location:Tax), data = ctmax,  control = list(adapt_delta = 0.95, max_treedepth = 15), iter = 10000);beep(sound = "mario")
+summary(maxmod)
 summary(maxmod)
 
 ctplot <- ggplot(ctmax, aes(x = log(mass), y = Ctmax, group = Tax, color = Tax)) +
