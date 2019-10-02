@@ -26,6 +26,7 @@ library(tidybayes)
 library(brms)
 library(fishualize)
 library(modelr)
+library(beepr)
 ```
 
 ```{r LOAD DATASETS}
@@ -193,22 +194,22 @@ site.scores <- as.tibble(scores(comp_mds)) %>%
 
 
 
-# mds.points <- as.data.frame(scores(comp_mds, "species")) %>%
-#   add_column(Genspe = rownames(.))
-# 
-# genspeabu <- comms %>%
-#   group_by(Genspe, Family) %>%
-#   summarize(count = n()) %>%
-#   inner_join(mds.points)
-# 
-# point.plot <- ggplot(genspeabu) +
-#   theme_bw() +
-#   geom_segment(aes(x=0, xend=NMDS1, y=0, yend=NMDS2, color = Family),
-#                arrow = arrow(length = unit(0.1, "cm")),
-#                inherit.aes = F) +
-#   geom_text_repel(aes(x=NMDS1, NMDS2, label=Genspe), size=2, inherit.aes = F) +
-#   scale_color_fish(discrete=TRUE, option = "Valenciennea_strigata")
-# point.plot
+mds.points <- as.data.frame(scores(comp_mds, "species")) %>%
+  add_column(Genspe = rownames(.))
+
+genspeabu <- comms %>%
+  group_by(Genspe, Family) %>%
+  summarize(count = n()) %>%
+  inner_join(mds.points)
+
+point.plot <- ggplot(genspeabu) +
+  theme_bw() +
+  geom_segment(aes(x=0, xend=NMDS1, y=0, yend=NMDS2, color = Family),
+               arrow = arrow(length = unit(0.1, "cm")),
+               inherit.aes = F) +
+  geom_text_repel(aes(x=NMDS1, NMDS2, label=Genspe), size=2, inherit.aes = F) +
+  scale_color_fish(discrete=TRUE, option = "Valenciennea_strigata")
+point.plot
 ###create convex hulls function
 convex_hull <- function(site.scores) site.scores[chull(site.scores$NMDS1, site.scores$NMDS2),] 
 
@@ -299,7 +300,7 @@ table(ctmax$Location, ctmax$Tax)
 table(ctmin$Location, ctmin$Tax)
 
 
-maxmod <- brm(Ctmax ~ (Location + Tax + Location:Tax), data = ctmax,  control = list(adapt_delta = 0.95, max_treedepth = 15), iter = 10000);beep(sound = "mario")
+maxmod <- brm(Ctmax ~ Tax -1, data = ctmax,  control = list(adapt_delta = 0.90, max_treedepth = 18), iter = 5000);beep(sound = "fanfare")
 summary(maxmod)
 summary(maxmod)
 
