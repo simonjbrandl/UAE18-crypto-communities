@@ -27,9 +27,11 @@ library(brms)
 library(fishualize)
 library(modelr)
 library(beepr)
+library(png)
+library(grid)
 ```
 
-```{r LOAD DATASETS}
+```{r LOAD DATASETS AND SILHOUETTES}
 #load datasets
 comms <- read.csv(file = "Data/UAE18_RawData_Comms.csv")
 ctdat <- read.csv(file = "Data/UAE_CT.csv")
@@ -43,6 +45,26 @@ ctdat <- ctdat %>% mutate(Distribution = case_when(Tax == "ECSEPULC" ~ "AG+GoM",
                                          Tax == "EVIOGUTT" ~ "GoM"))
 ctmax <- subset(ctdat, ctdat$Ctmax != "NA")
 ctmin <- subset(ctdat, ctdat$Ctmin != "NA")
+
+# silhouettes for study species
+img <- readPNG("Plots/Canomalus.png")
+canom <- rasterGrob(img, interpolate=TRUE)
+
+img <- readPNG("Plots/Epulcher.png")
+epulc <- rasterGrob(img, interpolate=TRUE)
+
+img <- readPNG("Plots/Eventermaculus.png")
+event <- rasterGrob(img, interpolate=TRUE)
+
+img <- readPNG("Plots/Hvulgaris.png")
+hvulg <- rasterGrob(img, interpolate=TRUE)
+
+img <- readPNG("Plots/Eguttata.png")
+egutt<- rasterGrob(img, interpolate=TRUE)
+
+img <- readPNG("Plots/Hfuscopinna.png")
+hfusc <- rasterGrob(img, interpolate=TRUE)
+
 ```
 
 ```{r COMMUNITY STRUCTURE: ABUNDANCE, BIOMASS, DIVERSITY}
@@ -294,67 +316,151 @@ ggsave("Plots/Fig3.pdf", Fig3, width = 4, height = 7, useDingbats = F)
 
 ```{r PHYSIOLOGY: CTmax and CTmin}
 # ct max and ctmin
-ctmax
+ctmax <- ctmax %>%
+    mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
+                              Tax == "ECSEPULC" ~ 5,
+                              Tax == "ENNEVENT" ~ 4,
+                              Tax == "HETEVULG" ~ 3,
+                              Tax == "EVIOGUTT" ~ 2,
+                              TRUE ~ 1),
+           taxloc = factor(interaction(Tax, Location)))
 
-table(ctmax$Location, ctmax$Tax)
-table(ctmin$Location, ctmin$Tax)
+table(ctmax$taxloc)
 
-
-maxmod <- brm(Ctmax ~ Tax -1, data = ctmax,  control = list(adapt_delta = 0.90, max_treedepth = 18), iter = 5000);beep(sound = "fanfare")
+maxmod <- brm(Ctmax ~ taxloc, data = ctmax,  control = list(adapt_delta = 0.995, max_treedepth = 18), iter = 5000);beep(sound = "coin")
 summary(maxmod)
-summary(maxmod)
 
-ctplot <- ggplot(ctmax, aes(x = log(mass), y = Ctmax, group = Tax, color = Tax)) +
-  geom_point() +
-  geom_smooth(method = "lm")
-ctplot
+ctmax.pred <- ctmax %>%
+  data_grid(taxloc)%>%  
+  add_predicted_draws(maxmod, n = 10000) %>%
+  separate(taxloc, c("Tax", "Location"), remove = F) %>%
+  mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
+                              Tax == "ECSEPULC" ~ 5,
+                              Tax == "ENNEVENT" ~ 4,
+                              Tax == "HETEVULG" ~ 3,
+                              Tax == "EVIOGUTT" ~ 2,
+                              TRUE ~ 1))
 
-summary(ctmaxmod)
-ctmax_sum <- ctmax %>% group_by(Distribution) %>% summarize(mean = mean(Ctmax), sd = sd(Ctmax), n = n()) %>%
-  mutate(se = sd / sqrt(n),
-         lci = mean - qt(1 - (0.05 / 2), n - 1) * se,
-         uci = mean + qt(1 - (0.05 / 2), n - 1) * se)
+ctmax.pred.plot <- ggplot(data = ctmax.pred) +
+  geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location))+
+  geom_point(aes(x = Ctmax, y = ordervar, shape = Tax, fill = Location),
+             data = ctmax, position = position_nudge(y = 0.45), size = 2, color = "black", shape = 23) +
+  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine"), labels = c("Arabian Gulf", "Gulf of Oman")) +
+  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
+  scale_shape_manual(values = c(8, 21:25)) +
+    theme_bw() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        legend.position = "top") +
+  guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  xlab("Critical thermal maximum (º Celsius)") +
+  scale_x_continuous(limits = c(34,41), breaks = seq(34,41,1)) +
+  annotation_custom(canom, xmin=33.75, xmax=35.25, ymin=6, ymax=7) +
+  annotation_custom(epulc, xmin=33.75, xmax=35.25, ymin=5, ymax=6) +
+  annotation_custom(event, xmin=33.75, xmax=35.25, ymin=4, ymax=5) +
+  annotation_custom(hvulg, xmin=33.75, xmax=35.25, ymin=3, ymax=4) +
+  annotation_custom(egutt, xmin=33.75, xmax=35.25, ymin=2, ymax=3) +
+  annotation_custom(hfusc, xmin=33.75, xmax=35.25, ymin=1, ymax=2) +
+  annotate("text", x = 34.5, y = 6.15, 
+            label = 'italic("C. anomalus")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 34.5, y = 5.15, 
+            label = 'italic("E. pulcher")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 34.5, y = 4.15, 
+            label = 'italic("E. ventermaculus")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 34.5, y = 3.15, 
+            label = 'italic("H. vulgaris")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 34.5, y = 2.15, 
+            label = 'italic("E. guttata")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 34.5, y = 1.15, 
+            label = 'italic("H. fuscopinna")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 9.5, y = 7, size = 5, label = "(a)")
+  
+ctmax.pred.plot
 
-ctmaxplot <- ggplot(data = ctmax)+
-  geom_jitter(aes(x = Genspe, y = Ctmax, color = Location, fill = Location, shape = Distribution), alpha = 0.7, width = 0.1, color = "black") +
-  geom_rect(data = ctmax_sum, aes(ymin =  lci, ymax = uci, xmin = 0, xmax = 7), alpha = 0.1) +
-  geom_hline(data = ctmax_sum, aes(yintercept = mean), lty = c(2,3)) +
-  stat_summary(aes(x = Genspe, y = Ctmax, color = Location, fill = Location, shape = Distribution), fun.data = "mean_cl_boot", size = 0.9, color = "black") +
-    theme_bw() + theme(legend.position="none",
-                       axis.text.x = element_text(angle = 45, hjust = 1, face = "italic", size = 6),
-                       axis.title.x=element_blank()) +
-  scale_color_manual(values = c("forestgreen", "gray5", "black")) +
-  scale_fill_manual(values = c("forestgreen", "gray5")) +
-  scale_shape_manual(values = c(22,23)) +
-  scale_y_continuous(limits = c(35,39), breaks = seq(35,39,0.5))+
-  ylab("Critical thermal maximum (º Celsius)")
-ctmaxplot
 
 
-ctminmod <- lm(Ctmin ~ Distribution, data = ctmin)
-summary(ctminmod)
-ctmin_sum <- ctmin %>% group_by(Location) %>% summarize(mean = mean(Ctmin), sd = sd(Ctmin), n = n()) %>%
-  mutate(se = sd / sqrt(n),
-         lci = mean - qt(1 - (0.05 / 2), n - 1) * se,
-         uci = mean + qt(1 - (0.05 / 2), n - 1) * se)
-ctminplot <- ggplot(data = ctmin)+
-  geom_jitter(aes(x = Genspe, y = Ctmin, color = Location, fill = Location, shape = Distribution), alpha = 0.7, width = 0.1, color = "black") +
-  geom_rect(data = ctmin_sum, aes(ymin =  lci, ymax = uci, xmin = 0, xmax = 7), alpha = 0.1) +
-  geom_hline(data = ctmin_sum, aes(yintercept = mean), lty = c(2,3)) +
-  stat_summary(aes(x = Genspe, y = Ctmin, color = Location, fill = Location, shape = Distribution), fun.data = "mean_cl_boot", size = 0.9, color = "black") +
-    theme_bw() + theme(legend.position="none",
-                       axis.text.x = element_text(angle = 45, hjust = 1, face = "italic", size = 6),
-                       axis.title.x=element_blank()) +
-  scale_color_manual(values = c("forestgreen", "gray5", "black")) +
-  scale_fill_manual(values = c("forestgreen", "gray5")) +
-  scale_shape_manual(values = c(22,23)) +
-  scale_y_continuous(limits = c(10,14), breaks = seq(10,14,0.5)) +
-  ylab("Critical thermal minimum (º Celsius)")
-ctminplot
 
-ctplots <- ggarrange(ctmaxplot, ctminplot, nrow = 2, ncol = 1)
+####ctmin
 
-ggsave("ct_plot.pdf", plot = ctplots, width = 7, height = 8, useDingbats=FALSE)
+ctmin <- ctmin %>%
+    mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
+                              Tax == "ECSEPULC" ~ 5,
+                              Tax == "ENNEVENT" ~ 4,
+                              Tax == "HETEVULG" ~ 3,
+                              Tax == "EVIOGUTT" ~ 2,
+                              TRUE ~ 1),
+           taxloc = factor(interaction(Tax, Location)))
+
+table(ctmin$taxloc)
+
+minmod <- brm(Ctmin ~ taxloc, data = ctmin,  control = list(adapt_delta = 0.995, max_treedepth = 18), iter = 5000);beep(sound = "coin")
+summary(minmod)
+
+ctmin.pred <- ctmin %>%
+  data_grid(taxloc)%>%  
+  add_predicted_draws(minmod, n = 10000) %>%
+  separate(taxloc, c("Tax", "Location"), remove = F) %>%
+  mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
+                              Tax == "ECSEPULC" ~ 5,
+                              Tax == "ENNEVENT" ~ 4,
+                              Tax == "HETEVULG" ~ 3,
+                              Tax == "EVIOGUTT" ~ 2,
+                              TRUE ~ 1))
+
+ctmin.pred.plot <- ggplot(data = ctmin.pred) +
+  geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location))+
+  geom_point(aes(x = Ctmin, y = ordervar, shape = Tax, fill = Location),
+             data = ctmin, position = position_nudge(y = 0.45), size = 2, color = "black", shape = 23) +
+  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine"), labels = c("Arabian Gulf", "Gulf of Oman")) +
+  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
+    theme_bw() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        legend.position = "top") +
+  guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  xlab("Critical thermal minimum (º Celsius)") +
+  scale_x_continuous(limits = c(9.5,16.5), breaks = seq(9,16.5,1)) +
+  annotation_custom(canom, xmin=15.25, xmax=16.75, ymin=6, ymax=7) +
+  annotation_custom(epulc, xmin=15.25, xmax=16.75, ymin=5, ymax=6) +
+  annotation_custom(event, xmin=15.25, xmax=16.75, ymin=4, ymax=5) +
+  annotation_custom(hvulg, xmin=15.25, xmax=16.75, ymin=3, ymax=4) +
+  annotation_custom(egutt, xmin=15.25, xmax=16.75, ymin=2, ymax=3) +
+  annotation_custom(hfusc, xmin=15.25, xmax=16.75, ymin=1, ymax=2) +
+  annotate("text", x = 16, y = 6.15, 
+            label = 'italic("C. anomalus")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 16, y = 5.15, 
+            label = 'italic("E. pulcher")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 16, y = 4.15, 
+            label = 'italic("E. ventermaculus")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 16, y = 3.15, 
+            label = 'italic("H. vulgaris")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 16, y = 2.15, 
+            label = 'italic("E. guttata")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 16, y = 1.15, 
+            label = 'italic("H. fuscopinna")', size = 3.5, parse = TRUE) +
+    annotate("text", x = 9.5, y = 7, size = 5, label = "(a)")
+  
+ctmin.pred.plot
+
+#function for legend
+g_legend<-function(a.gplot){
+  tmp <- ggplot_gtable(ggplot_build(a.gplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)}
+
+mylegend<-g_legend(ctmin.pred.plot)
+
+ctplots <- gbm::grid.arrange( mylegend, gridExtra::arrangeGrob(ctmin.pred.plot + theme(legend.position="none"),
+                         ctmax.pred.plot + theme(legend.position="none"),
+                         nrow=1),
+            nrow=2, heights=c(1, 12))
+
+ggsave("Plots/ct_plot.pdf", plot = ctplots, width = 10, height = 9, useDingbats=FALSE)
 ```
 
 ``` {r}
