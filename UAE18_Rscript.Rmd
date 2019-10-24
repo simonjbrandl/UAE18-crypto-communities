@@ -29,6 +29,10 @@ library(modelr)
 library(beepr)
 library(png)
 library(grid)
+library(scales)
+library(iNEXT)
+library(geomnet)
+library(GGally)
 ```
 
 ```{r LOAD DATASETS AND SILHOUETTES}
@@ -65,6 +69,9 @@ egutt<- rasterGrob(img, interpolate=TRUE)
 img <- readPNG("Plots/Hfuscopinna.png")
 hfusc <- rasterGrob(img, interpolate=TRUE)
 
+
+uaecols <- fish(n = 2, option = "Trimma_lantana", end = 0.3)
+image(volcano, col = uaecols)
 ```
 
 ```{r COMMUNITY STRUCTURE: ABUNDANCE, BIOMASS, DIVERSITY}
@@ -100,14 +107,19 @@ abu.pred <- comm_means %>%
   add_predicted_draws(abundance.model, n = 1000) %>%
   mutate(pred.density = exp(.prediction))
 
+abu.median <- abu.pred %>%
+  group_by(Location) %>%
+  summarize(median = median(pred.density), sd = sd(pred.density)) %>%
+  mutate(se = sd/sqrt(18))
+abu.median
 
 abu.pred.plot <- ggplot(data = abu.pred) +
-  geom_halfeyeh(aes(y = rev(Location), x = pred.density, fill = Location)) +
+  geom_halfeyeh(aes(y = rev(Location), x = pred.density, fill = Location), color = "black") +
   geom_jitter(aes(x = Density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
              data = comm_means, height = 0.02, 
              alpha = 0.5, size = 2) +
-  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
-  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.5)) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = alpha(uaecols, 0.5)) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
   scale_x_log10(limits = c(0.1,5e2), breaks=c(0,0.1,1,10,100), labels=c(0,0.1,1,10,100)) +
   theme_bw() +
@@ -135,16 +147,21 @@ bio.pred <- comm_means %>%
   add_predicted_draws(biomass.model, n = 1000) %>%
   mutate(pred.biomass = exp(.prediction))
 
+bio.median <- bio.pred %>%
+  group_by(Location) %>%
+  summarize(median = median(pred.biomass), sd = sd(pred.biomass)) %>%
+  mutate(se = sd/sqrt(18))
+bio.median
 
 bio.pred.plot <- ggplot(data = bio.pred) +
-  geom_halfeyeh(aes(y = rev(Location), x = pred.biomass, fill = Location)) +
+  geom_halfeyeh(aes(y = rev(Location), x = pred.biomass, fill = Location), color = "black") +
   geom_jitter(aes(x = Biomass_per_m2, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
              data = comm_means, height = 0.02, 
              alpha = 0.5, size = 2) +
-  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
-  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.5)) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = alpha(uaecols, 0.5)) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-  scale_x_log10(limits = c(0.1,1e3), breaks=c(0,0.1,1,10,1000), labels=c(0,0.1,1,10,1000)) +
+  scale_x_log10(limits = c(0.1,1e3), breaks=c(0,0.1,1,10,100,1000), labels=c(0,0.1,1,10,100,1000)) +
   theme_bw() +
   theme(axis.text.y = element_blank(), 
         axis.ticks.y = element_blank(),
@@ -170,14 +187,19 @@ div.pred <- comm_means %>%
   add_predicted_draws(diversity.model, n = 1000) %>%
   mutate(pred.diversity = exp(.prediction))
 
+div.median <- div.pred %>%
+  group_by(Location) %>%
+  summarize(median = median(pred.diversity), sd = sd(pred.diversity)) %>%
+  mutate(se = sd/sqrt(18))
+div.median
 
 div.pred.plot <- ggplot(data = div.pred) +
-  geom_halfeyeh(aes(y = rev(Location), x = pred.diversity, fill = Location)) +
+  geom_halfeyeh(aes(y = rev(Location), x = pred.diversity, fill = Location), color = "black") +
   geom_jitter(aes(x = Species_density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
              data = comm_means, height = 0.02, 
              alpha = 0.5, size = 2) +
-  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
-  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.5)) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = alpha(uaecols, 0.5)) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
   scale_x_log10(limits = c(0.1,100), breaks=c(0,0.1,1,10,100), labels=c(0,0.1,1,10,100)) +
   theme_bw() +
@@ -192,9 +214,22 @@ div.pred.plot
 
 ggsave("Plots/divpred.pdf", div.pred.plot, width = 8, height = 4, useDingbats = F)
 
-Fig1 <- ggarrange(div.pred.plot, abu.pred.plot, bio.pred.plot, nrow = 3)
+#function for legend
+g_legend<-function(a.gplot){
+  tmp <- ggplot_gtable(ggplot_build(a.gplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)}
 
-ggsave("Plots/Fig1ABC.pdf", Fig1, width = 8, height = 12, useDingbats = F)
+mylegend<-g_legend(div.pred.plot)
+
+Fig1 <- gbm::grid.arrange(mylegend, gridExtra::arrangeGrob(div.pred.plot + theme(legend.position="none"),
+                         abu.pred.plot + theme(legend.position="none"),
+                         bio.pred.plot + theme(legend.position="none"),
+                         nrow=3),
+            nrow=2, heights=c(1, 12))
+
+ggsave("Plots/Fig1_MS.pdf", Fig1, width = 8, height = 12, useDingbats = F)
 ```
 
 ```{r COMMUNITY COMPOSITION NMDS}
@@ -255,14 +290,14 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
                              shape = reorder(Site, sort(as.numeric(site_intercepts))))) +
   theme_bw()+
   theme(legend.position = "right") +
-  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
-  scale_fill_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
     guides(fill = guide_legend(ncol = 1),
          shape = guide_legend(ncol = 1))
 
 comp_plot
-ggsave("Plots/comp_plot.pdf", plot = comp_plot, width = 8, height = 6, useDingbats=FALSE)
+ggsave("Plots/Fig2_MS.pdf", plot = comp_plot, width = 8, height = 6, useDingbats=FALSE)
 ```
 
 ```{r SIZE: E. ventermaculis and C. anomalus}
@@ -280,9 +315,9 @@ size.preds.event <- size.strs.event %>%
 
 event.plot <- ggplot(size.preds.event, aes(x = TL, y = W, color = ordered(Location))) +
   geom_line(aes(y = .value, group = paste(Location, .draw)), alpha = .3, lwd = 0.1) +
-  geom_point(data = size.strs.event, aes(fill = Location), alpha = 0.5, size = 0.8, shape = 23, color = "black") +
-  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
-  scale_fill_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  geom_point(data = size.strs.event, aes(fill = Location), alpha = 0.8, size = 1, shape = 23, color = "black") +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
   ylab("body weight in g") +
   xlab("total length (TL) in mm") +
   theme_bw() +
@@ -301,16 +336,16 @@ size.preds.canom <- size.strs.canom %>%
 
 canom.plot <- ggplot(size.preds.canom, aes(x = TL, y = W, color = ordered(Location))) +
   geom_line(aes(y = .value, group = paste(Location, .draw)), alpha = .3, lwd = 0.1) +
-  geom_point(data = size.strs.canom, aes(fill = Location), size = 0.8, alpha = 0.5, shape = 23, color = "black") +
-  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
-  scale_fill_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  geom_point(data = size.strs.canom, aes(fill = Location), size = 1, alpha = 0.8, shape = 23, color = "black") +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
   ylab("body weight in g") +
   xlab("total length (TL) in mm") +
   theme_bw() +
   theme(legend.position = "none")
 canom.plot
 Fig3 <- ggarrange(event.plot, canom.plot, ncol = 1, nrow = 2)
-ggsave("Plots/Fig3.pdf", Fig3, width = 4, height = 7, useDingbats = F)
+ggsave("Plots/Fig3_MS.pdf", Fig3, width = 4, height = 7, useDingbats = F)
 ###comp abundance of three species in AG & GoO
 ```
 
@@ -342,11 +377,11 @@ ctmax.pred <- ctmax %>%
                               TRUE ~ 1))
 
 ctmax.pred.plot <- ggplot(data = ctmax.pred) +
-  geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location))+
-  geom_point(aes(x = Ctmax, y = ordervar, shape = Tax, fill = Location),
-             data = ctmax, position = position_nudge(y = 0.45), size = 2, color = "black", shape = 23) +
-  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine"), labels = c("Arabian Gulf", "Gulf of Oman")) +
-  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
+  geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location), color = "black")+
+  geom_jitter(aes(x = Ctmax, y = ordervar, shape = Tax, fill = Location),
+             data = ctmax, size = 1.5, color = "black", shape = 23, height = 0.1) +
+  scale_color_manual(values = uaecols, labels = c("Arabian Gulf", "Gulf of Oman")) +
+  scale_fill_manual(values = alpha(uaecols, 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
   scale_shape_manual(values = c(8, 21:25)) +
     theme_bw() +
   theme(axis.title.y = element_blank(),
@@ -375,7 +410,7 @@ ctmax.pred.plot <- ggplot(data = ctmax.pred) +
             label = 'italic("E. guttata")', size = 3.5, parse = TRUE) +
     annotate("text", x = 34.5, y = 1.15, 
             label = 'italic("H. fuscopinna")', size = 3.5, parse = TRUE) +
-    annotate("text", x = 9.5, y = 7, size = 5, label = "(a)")
+    annotate("text", x = 34, y = 7, size = 5, label = "(b)")
   
 ctmax.pred.plot
 
@@ -410,11 +445,11 @@ ctmin.pred <- ctmin %>%
                               TRUE ~ 1))
 
 ctmin.pred.plot <- ggplot(data = ctmin.pred) +
-  geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location))+
-  geom_point(aes(x = Ctmin, y = ordervar, shape = Tax, fill = Location),
-             data = ctmin, position = position_nudge(y = 0.45), size = 2, color = "black", shape = 23) +
-  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine"), labels = c("Arabian Gulf", "Gulf of Oman")) +
-  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
+  geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location), color = "black")+
+  geom_jitter(aes(x = Ctmin, y = ordervar, shape = Tax, fill = Location),
+             data = ctmin, size = 1.5, color = "black", shape = 23, height = 0.1) +
+  scale_color_manual(values = uaecols, labels = c("Arabian Gulf", "Gulf of Oman")) +
+  scale_fill_manual(values = alpha(uaecols, 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
     theme_bw() +
   theme(axis.title.y = element_blank(),
         axis.text.y = element_blank(), 
@@ -460,121 +495,121 @@ ctplots <- gbm::grid.arrange( mylegend, gridExtra::arrangeGrob(ctmin.pred.plot +
                          nrow=1),
             nrow=2, heights=c(1, 12))
 
-ggsave("Plots/ct_plot.pdf", plot = ctplots, width = 10, height = 9, useDingbats=FALSE)
-```
-
-``` {r}
-# map of study region
-
-####FIGURE 1B####
-library(ggmap)
-
-world <- map_data("world")
-world_sub <- subset(world, world$long >= 50 & world$long <= 60 & world$lat >= 20 & world$lat <= 30)
-
-country_names <- world_sub %>% group_by(region) %>% summarize(lat = mean(lat), long = mean(long))
-
-UAEcoord <- comms[c(2,3,20,21)]
-UAEcoord_unique <- unique(UAEcoord)
-
-middle.east <- ggplot() +
-  geom_map(data = world_sub, map = world, aes(x = long, y = lat, map_id = region), fill = "grey69", color = "grey46", lwd = 0.1) +
-  geom_point(data = UAEcoord_unique, aes(x = long, y = Lat, color = Location), size = 3, alpha = 1) +
-  xlab("Longitude") + ylab("Latitude") +
-  # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
-  # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
-  # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
-  annotate("text", label = "United Arab Emirates", x = 54, y = 23.5, size = 3, colour = "black") +
-  scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
-  theme_bw() + theme(axis.title = element_text(size=10),
-                     axis.text.x = element_text(
-                       size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.text=element_text(size=10),
-                     legend.title = element_text(size = 10, face = "bold"),
-                     panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-                     legend.position = c(0.5, 0.9),
-                     legend.direction = "horizontal",
-                     legend.background = element_rect(fill="white", color = "black", size=0.2))
-
-middle.east
-ggsave("middle_east.pdf", plot = middle.east, width = 6, height = 5, useDingbats=FALSE)
-
-UAElarge <- subset(world, world$long >= -10 & world$long <= 120 & world$lat >= 0 & world$lat <= 70)
-
-middle.east.large <- ggplot() +
-  geom_map(data = UAElarge, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
-  xlab("Longitude") + ylab("Latitude") +
-  # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
-  # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
-  # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
-  scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
-  theme_bw() + theme(axis.title = element_text(size=10),
-                     axis.text.x = element_text(
-                       size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.text=element_text(size=10),
-                     legend.title = element_text(size = 10, face = "bold"),
-                     panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-                     legend.position = c(0.5, 0.9),
-                     legend.direction = "horizontal",
-                     legend.background = element_rect(fill="white", color = "black", size=0.2))
-
-middle.east.large
-ggsave("middle_east_large.pdf", plot = middle.east.large, width = 6, height = 4, useDingbats=FALSE)
-
-
-UAEmid <- subset(world, world$long >= 30 & world$long <= 80 & world$lat >= 10 & world$lat <= 40)
-
-middle.east.mid <- ggplot() +
-  geom_map(data = UAEmid, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
-  xlab("Longitude") + ylab("Latitude") +
-  # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
-  # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
-  # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
-  scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
-  theme_bw() + theme(axis.title = element_text(size=10),
-                     axis.text.x = element_text(
-                       size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.text=element_text(size=10),
-                     legend.title = element_text(size = 10, face = "bold"),
-                     panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-                     legend.position = c(0.5, 0.9),
-                     legend.direction = "horizontal",
-                     legend.background = element_rect(fill="white", color = "black", size=0.2))
-
-middle.east.mid
-ggsave("middle_east_large.pdf", plot = middle.east.large, width = 6, height = 4, useDingbats=FALSE)
-
-america <- subset(world, world$region == "United States of America" & world$region == "Canada")
-
-middle.east.mid <- ggplot() +
-  geom_map(data = UAEmid, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
-  xlab("Longitude") + ylab("Latitude") +
-  # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
-  # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
-  # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
-  scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
-  theme_bw() + theme(axis.title = element_text(size=10),
-                     axis.text.x = element_text(
-                       size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.text=element_text(size=10),
-                     legend.title = element_text(size = 10, face = "bold"),
-                     panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-                     legend.position = c(0.5, 0.9),
-                     legend.direction = "horizontal",
-                     legend.background = element_rect(fill="white", color = "black", size=0.2))
-
-middle.east.mid
+ggsave("Plots/Fig4_MS.pdf", plot = ctplots, width = 12, height = 8, useDingbats=FALSE)
 ```
 
 ```{r}
+# # map of study region
+# 
+# ####FIGURE 1B####
+# library(ggmap)
+# 
+# world <- map_data("world")
+# world_sub <- subset(world, world$long >= 50 & world$long <= 60 & world$lat >= 20 & world$lat <= 30)
+# 
+# country_names <- world_sub %>% group_by(region) %>% summarize(lat = mean(lat), long = mean(long))
+# 
+# UAEcoord <- comms[c(2,3,20,21)]
+# UAEcoord_unique <- unique(UAEcoord)
+# 
+# middle.east <- ggplot() +
+#   geom_map(data = world_sub, map = world, aes(x = long, y = lat, map_id = region), fill = "grey69", color = "grey46", lwd = 0.1) +
+#   geom_point(data = UAEcoord_unique, aes(x = long, y = Lat, color = Location), size = 3, alpha = 1) +
+#   xlab("Longitude") + ylab("Latitude") +
+#   # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
+#   # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
+#   # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
+#   annotate("text", label = "United Arab Emirates", x = 54, y = 23.5, size = 3, colour = "black") +
+#   scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
+#   theme_bw() + theme(axis.title = element_text(size=10),
+#                      axis.text.x = element_text(
+#                        size = 10),
+#                      axis.text.y = element_text(size = 10),
+#                      legend.text=element_text(size=10),
+#                      legend.title = element_text(size = 10, face = "bold"),
+#                      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+#                      legend.position = c(0.5, 0.9),
+#                      legend.direction = "horizontal",
+#                      legend.background = element_rect(fill="white", color = "black", size=0.2))
+# 
+# middle.east
+# ggsave("middle_east.pdf", plot = middle.east, width = 6, height = 5, useDingbats=FALSE)
+# 
+# UAElarge <- subset(world, world$long >= -10 & world$long <= 120 & world$lat >= 0 & world$lat <= 70)
+# 
+# middle.east.large <- ggplot() +
+#   geom_map(data = UAElarge, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
+#   xlab("Longitude") + ylab("Latitude") +
+#   # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
+#   # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
+#   # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
+#   scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
+#   theme_bw() + theme(axis.title = element_text(size=10),
+#                      axis.text.x = element_text(
+#                        size = 10),
+#                      axis.text.y = element_text(size = 10),
+#                      legend.text=element_text(size=10),
+#                      legend.title = element_text(size = 10, face = "bold"),
+#                      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+#                      legend.position = c(0.5, 0.9),
+#                      legend.direction = "horizontal",
+#                      legend.background = element_rect(fill="white", color = "black", size=0.2))
+# 
+# middle.east.large
+# ggsave("middle_east_large.pdf", plot = middle.east.large, width = 6, height = 4, useDingbats=FALSE)
+# 
+# 
+# UAEmid <- subset(world, world$long >= 30 & world$long <= 80 & world$lat >= 10 & world$lat <= 40)
+# 
+# middle.east.mid <- ggplot() +
+#   geom_map(data = UAEmid, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
+#   xlab("Longitude") + ylab("Latitude") +
+#   # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
+#   # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
+#   # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
+#   scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
+#   theme_bw() + theme(axis.title = element_text(size=10),
+#                      axis.text.x = element_text(
+#                        size = 10),
+#                      axis.text.y = element_text(size = 10),
+#                      legend.text=element_text(size=10),
+#                      legend.title = element_text(size = 10, face = "bold"),
+#                      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+#                      legend.position = c(0.5, 0.9),
+#                      legend.direction = "horizontal",
+#                      legend.background = element_rect(fill="white", color = "black", size=0.2))
+# 
+# middle.east.mid
+# ggsave("middle_east_large.pdf", plot = middle.east.large, width = 6, height = 4, useDingbats=FALSE)
+# 
+# america <- subset(world, world$region == "United States of America" & world$region == "Canada")
+# 
+# middle.east.mid <- ggplot() +
+#   geom_map(data = UAEmid, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
+#   xlab("Longitude") + ylab("Latitude") +
+#   # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
+#   # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
+#   # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
+#   scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
+#   theme_bw() + theme(axis.title = element_text(size=10),
+#                      axis.text.x = element_text(
+#                        size = 10),
+#                      axis.text.y = element_text(size = 10),
+#                      legend.text=element_text(size=10),
+#                      legend.title = element_text(size = 10, face = "bold"),
+#                      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+#                      legend.position = c(0.5, 0.9),
+#                      legend.direction = "horizontal",
+#                      legend.background = element_rect(fill="white", color = "black", size=0.2))
+# 
+# middle.east.mid
+```
+
+```{r DIET METABARCODING: NMDS PLOTS}
 ### gut content metabarcoding data
-detach("package:MASS", unload=TRUE)
-guts.meta <- read.csv(file = "UAE_Metabarcoding.csv")
-coi.seqs <- read.csv(file = "UAE_COI.csv") %>%
+
+guts.meta <- read.csv(file = "Data/UAE_Metabarcoding.csv")
+coi.seqs <- read.csv(file = "Data/UAE_COI.csv") %>%
   select(-c(UAE18862.1, UAE18400.1)) %>%
   filter(!species %in% c("Coryogalops anomolus", 
                          "Neopomacentrus miryae", 
@@ -586,6 +621,7 @@ coi.seqs <- read.csv(file = "UAE_COI.csv") %>%
                          "Butis gymnopomus",
                          "Dinematichthys iluocoeteoides",
                          "Oncorhynchus nerka"))
+
 #create vector for column names 
 cnames <- as.character(coi.seqs$ID)
 coi.sub <- coi.seqs[c(19:104)]%>%
@@ -596,7 +632,7 @@ coi.sub <- coi.seqs[c(19:104)]%>%
   set_colnames(c("ID.match", cnames)) %>%
   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
   select(ID.match, Location, Tax, everything()) %>% 
-  mutate(rowsum = rowSums(.[4:552])) %>%
+  mutate(rowsum = rowSums(.[4:546])) %>%
   filter(rowsum >= 1)
 
 coi.sub.tax <- coi.sub %>%
@@ -721,7 +757,7 @@ mds.top3.coi.loc
 
 mds.coi.loc.vec <- ggarrange(mds.pa.coi.loc, mds.top3.coi.loc, ncol = 1, nrow = 2)
 
-ggsave("mds.pa.coi.loc.pdf", mds.coi.loc.vec, width = 7, height = 10, useDingbats = FALSE)
+ggsave("Plots/mds.pa.coi.loc.pdf", mds.coi.loc.vec, width = 7, height = 10, useDingbats = FALSE)
 
 ### bring in other taxa
 coi.sub.taxloc <- coi.sub
@@ -923,7 +959,7 @@ ggsave("mds.coi.vec.pdf", coi.plots, width = 12, height = 12, useDingbats = FALS
 
 
 ###23S data
-seqs23s <- read.csv(file = "UAE_23S.csv") %>%
+seqs23s <- read.csv(file = "Data/UAE_23S.csv") %>%
   select(-c(UAE18862.1, UAE18400.1))
 #create vector for column names 
 cnames <- as.character(seqs23s$ESV)
@@ -1180,7 +1216,127 @@ plots23s <- ggarrange(mds.23s.loc.vec, mds.23s.taxloc.vec, nrow = 1, ncol = 2)
 
 ggsave("plots23svectors.pdf", plots23s, width = 12, height = 12, useDingbats = FALSE)
 
+
+#######################
+#######################
+#######################network
+meta.coi <- coi.sub.taxloc[c(1:3)]
+network.coi <- coi.pa %>%
+  select(-rowsum) %>%
+  pivot_longer(cols = 2:547, names_to = "ID") %>%
+  filter(value > 0) %>%
+  left_join(meta.coi[1:3], by = "ID.match") %>%
+  group_by(ID, Location, Tax) %>%
+  summarize(value = sum(value))
+
+table(network.coi$ID, network.coi$Location)
+
+share.color <- network.coi %>%
+  select(ID, Location) %>%
+  distinct() 
+
+shared <- share.color %>%
+  mutate(indicator = 1) %>%
+  group_by(ID) %>%
+  summarize(shared = sum(indicator)) %>%
+  mutate(sharedornot = case_when(shared == 1 ~ "unique",
+                                 TRUE ~ "Shared")) %>%
+  right_join(share.color) %>%
+  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
+                                 TRUE ~ paste(sharedornot)))
+  
+network.coi.colored <- network.coi %>%
+  left_join(shared, by = "ID") %>%
+  mutate(taxloc = interaction(Tax, Location.y))
+
+uaecols.network <- c(uaecols, "grey46")
+
+network.plot.coi <- ggplot(data = network.coi.colored) +
+  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = taxloc, colour = share.color, shape = Tax),
+  lwd=2, labelon = F, alpha = 0.8, ealpha = 0.1, arrowsize = 0.1, linewidth = 0.05,
+  vjust = 0.5, hjust = 0.5) +
+  # labelcolour = cfnet2$lcolour) +
+  theme_net() +
+  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
+  scale_color_manual(values = uaecols.network) +
+  scale_shape_manual(values = c(3:5)) +
+  theme(legend.position = "right")
+network.plot.coi
+
+
+cfstat <- graph_from_data_frame(network.coi)
+
+###get network community characteristics
+ed <- edge_density(cfstat, loops=F)
+
+net.sym <- as.undirected(cfstat, mode= "collapse", edge.attr.comb=list(weight="sum", "ignore"))
+
+ceb <- cluster_edge_betweenness(net.sym) 
+memb <- membership(ceb)
+modul <- modularity(ceb)
 ############
+
+meta.23s <- sub23s.loc[c(1:3)]
+network.23s <- pa23s.loc %>%
+  select(-rowsum) %>%
+  pivot_longer(cols = 2:3007, names_to = "ID") %>%
+  filter(value > 0) %>%
+  left_join(meta.23s[1:3], by = "ID.match") %>%
+  group_by(ID, Location, Tax) %>%
+  summarize(value = sum(value))
+
+share.color.23s <- network.23s %>%
+  select(ID, Location) %>%
+  distinct() 
+
+shared.23s <- share.color.23s %>%
+  mutate(indicator = 1) %>%
+  group_by(ID) %>%
+  summarize(shared = sum(indicator)) %>%
+  mutate(sharedornot = case_when(shared == 1 ~ "unique",
+                                 TRUE ~ "Shared")) %>%
+  right_join(share.color.23s) %>%
+  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
+                                 TRUE ~ paste(sharedornot)))
+  
+network.23s.colored <- network.23s %>%
+  left_join(shared, by = "ID") %>%
+  mutate(taxloc = interaction(Tax, Location.y))
+
+uaecols.network <- c(uaecols, "grey46")
+
+network.plot.23s <- ggplot(data = network.23s.colored) +
+  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = taxloc, colour = share.color, shape = Tax),
+  lwd = 2, labelon = F, alpha = 0.8, ealpha = 0.1, arrowsize = 0.1, linewidth = 0.05,
+  vjust = 0.5, hjust = 0.5, repel = TRUE) +
+  # labelcolour = cfnet2$lcolour) +
+  theme_net() +
+  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
+  scale_color_manual(values = uaecols.network) +
+  scale_shape_manual(values = c(3:5)) +
+  theme(legend.position = "right")
+network.plot.23s
+
+cfstat23s <- graph_from_data_frame(network.23s)
+
+###get network community characteristics
+ed23s <- edge_density(cfstat23s, loops=F)
+
+net.sym23s <- as.undirected(cfstat23s, mode= "collapse", edge.attr.comb=list(weight="sum", "ignore"))
+
+ceb23s <- cluster_edge_betweenness(net.sym23s) 
+memb23s <- membership(ceb23s)
+modul23s <- modularity(ceb23s)
+
+networklegend<-g_legend(network.plot.23s)
+
+networkplots <- gbm::grid.arrange(mylegend, gridExtra::arrangeGrob(network.plot.coi + theme(legend.position="none"),
+                         network.plot.23s + theme(legend.position="none"),
+                         nrow=2),
+            nrow=2, heights=c(1, 12))
+
+ggsave("Plots/Fig5_MS.pdf", plot = networkplots, width = 6, height = 8, useDingbats=FALSE)
+
 ### do taxa in GoO only
 # sub23s.tax <- sub23s %>%
 #   filter(Location == "GoO")
@@ -1246,4 +1402,395 @@ ggsave("plots23svectors.pdf", plots23s, width = 12, height = 12, useDingbats = F
 # ggsave("plots23s.pdf", plots23s, width = 10, height = 8, useDingbats = FALSE)
 ```
 
+```{r OTU/ESV DIVESRITY: RAREFACTION}
+# #coi otus and sequences
+# preydiv.coi <- coi.sub %>%
+#   select(-rowsum) %>%
+#   pivot_longer(OTU_8:OTU_394, names_to = "OTUs") %>%
+#   mutate(presabs = case_when(value > 0 ~ 1,
+#                               TRUE ~ 0)) %>%
+#   arrange(-value)
+#   # group_by(ID.match, Location, Tax) %>%
+#   # summarize(nb.otu.coi = sum(presabs),
+#   #           nb.seq.coi = sum(value))
+# preydiv.coi
+# 
+# #23s esvs and sequences
+# preydiv.23s <-   sub23s %>%
+#   select(-rowsum) %>%
+#   pivot_longer(ESV_000034:ESV_036113, names_to = "ESVs") %>%
+#   mutate(presabs = case_when(value > 0 ~ 1,
+#                               TRUE ~ 0)) %>%
+#   group_by(ID.match, Location, Tax) %>%
+#   summarize(nb.esv.23s = sum(presabs),
+#             nb.seq.23s = sum(value))
+# preydiv.23s
+# 
+# preydiv.allprim <- inner_join(preydiv.coi, preydiv.23s, by = c("ID.match", "Location", "Tax")) %>%
+#   mutate(ratio_tax = nb.otu.coi/nb.esv.23s,
+#          ratio_seq = nb.seq.coi/nb.seq.23s,
+#          tax_unit_sum = nb.otu.coi + nb.esv.23s) %>%
+#   group_by(Location, Tax) %>%
+#   summarize(mean_nbotu = mean(nb.otu.coi),
+#             mean_nbesv = mean(nb.esv.23s),
+#             mean_nbtotal = mean(tax_unit_sum),
+#             mean_seq_coi = mean(nb.seq.coi),
+#             mean_seq_23s = mean(nb.seq.23s),
+#             mean_ratio_tax = mean(ratio_tax),
+#             mean_ratio_seq = mean(ratio_seq)) %>%
+#   arrange(Tax)
+# preydiv.allprim
 
+
+# 
+# ### diatoms
+# coi.seqs.bac <- coi.seqs %>%
+#   filter(phylum == "Bacillariophyta")
+# cnames.bac <- as.character(coi.seqs.bac$ID)
+# coi.sub.bac <- coi.seqs.bac[c(19:104)]%>%
+#   #grab columns of fish gut specimens
+#   rownames_to_column %>% 
+#   gather(var, value, -rowname) %>% 
+#   spread(rowname, value) %>%
+#   set_colnames(c("ID.match", cnames.bac)) %>%
+#   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
+#   select(ID.match, Location, Tax, everything())
+# 
+# preydiv.coi.bac <- coi.sub.bac %>%
+#   pivot_longer(OTU_8:OTU_395, names_to = "OTUs") %>%
+#   mutate(presabs = case_when(value > 0 ~ 1,
+#                               TRUE ~ 0)) %>%
+#   group_by(ID.match, Location, Tax) %>%
+#   summarize(nb.otu.coi = sum(presabs),
+#             nb.seq.coi = sum(value))
+# preydiv.coi.bac
+
+# ###
+# ###23S data
+# bac.23s <- seqs23s %>%
+#   filter(Phylum == "Bacillariophyta")
+# cnames <- as.character(bac.23s$ESV)
+# sub23s.bac <- bac.23s %>%
+#   #grab columns of fish gut specimens
+#   select(., contains("UAE18")) %>%
+# #   rownames_to_column %>% 
+# #   gather(var, value, -rowname) %>% 
+# #   spread(rowname, value) %>%
+# #   set_colnames(c("ID.match", cnames)) %>%
+# #   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") 
+# # 
+# # preydiv.23s.bac <- sub23s.bac %>%
+# #   pivot_longer(ESV_005478:ESV_036113, names_to = "ESVs") %>%
+# #   mutate(presabs = case_when(value > 0 ~ 1,
+# #                               TRUE ~ 0)) %>%
+# #   group_by(ID.match, Location, Tax) %>%
+# #   summarize(nb.esv.23s = sum(presabs),
+# #             nb.seq.23s = sum(value))
+# # preydiv.23s.bac
+# # 
+# # preydiv.allprim.bac <- inner_join(preydiv.coi.bac, preydiv.23s.bac, by = c("ID.match", "Location", "Tax")) %>%
+# #   mutate(ratio_tax = nb.otu.coi/nb.esv.23s,
+# #          ratio_seq = nb.seq.coi/nb.seq.23s,
+# #          tax_unit_sum = nb.otu.coi + nb.esv.23s) %>%
+# #   group_by(Location, Tax) %>%
+# #   summarize(mean_nbotu = mean(nb.otu.coi),
+# #             mean_nbesv = mean(nb.esv.23s),
+# #             mean_nbtotal = mean(tax_unit_sum),
+# #             mean_seq_coi = mean(nb.seq.coi),
+# #             mean_seq_23s = mean(nb.seq.23s),
+# #             mean_ratio_tax = mean(ratio_tax),
+# #             mean_ratio_seq = mean(ratio_seq)) %>%
+# #   arrange(Tax)
+# # preydiv.allprim.bac
+# 
+# 
+# ####all but diatoms
+# coi.seqs.nobac <- coi.seqs %>%
+#   filter(phylum != "Bacillariophyta")
+# cnames.nobac <- as.character(coi.seqs.nobac$ID)
+# coi.sub.nobac <- coi.seqs.nobac[c(19:104)]%>%
+#   #grab columns of fish gut specimens
+#   rownames_to_column %>% 
+#   gather(var, value, -rowname) %>% 
+#   spread(rowname, value) %>%
+#   set_colnames(c("ID.match", cnames.nobac)) %>%
+#   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
+#   select(ID.match, Location, Tax, everything())
+# 
+# preydiv.coi.nobac <- coi.sub.nobac %>%
+#   pivot_longer(OTU_11:OTU_394, names_to = "OTUs") %>%
+#   mutate(presabs = case_when(value > 0 ~ 1,
+#                               TRUE ~ 0)) %>%
+#   group_by(ID.match, Location, Tax) %>%
+#   summarize(nb.otu.coi = sum(presabs),
+#             nb.seq.coi = sum(value))
+# preydiv.coi.nobac
+# 
+# ###
+# ###23S data
+# nobac.23s <- seqs23s %>%
+#   filter(Phylum != "Bacillariophyta")
+# cnames <- as.character(nobac.23s$ESV)
+# sub23s.nobac <- nobac.23s %>%
+#   #grab columns of fish gut specimens
+#   select(., contains("UAE18")) %>%
+#   rownames_to_column %>% 
+#   gather(var, value, -rowname) %>% 
+#   spread(rowname, value) %>%
+#   set_colnames(c("ID.match", cnames)) %>%
+#   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") 
+# 
+# preydiv.23s.nobac <- sub23s.nobac %>%
+#   pivot_longer(ESV_000034:ESV_036112, names_to = "ESVs") %>%
+#   mutate(presabs = case_when(value > 0 ~ 1,
+#                               TRUE ~ 0)) %>%
+#   group_by(ID.match, Location, Tax) %>%
+#   summarize(nb.esv.23s = sum(presabs),
+#             nb.seq.23s = sum(value))
+# preydiv.23s.nobac
+# 
+# preydiv.allprim.nobac <- inner_join(preydiv.coi.nobac, preydiv.23s.nobac, by = c("ID.match", "Location", "Tax")) %>%
+#   mutate(ratio_tax = nb.otu.coi/nb.esv.23s,
+#          ratio_seq = nb.seq.coi/nb.seq.23s,
+#          tax_unit_sum = nb.otu.coi + nb.esv.23s) %>%
+#   group_by(Location, Tax) %>%
+#   summarize(mean_nbotu = mean(nb.otu.coi),
+#             mean_nbesv = mean(nb.esv.23s),
+#             mean_nbtotal = mean(tax_unit_sum),
+#             mean_seq_coi = mean(nb.seq.coi),
+#             mean_seq_23s = mean(nb.seq.23s),
+#             mean_ratio_tax = mean(ratio_tax),
+#             mean_ratio_seq = mean(ratio_seq)) %>%
+#   arrange(Tax)
+# preydiv.allprim.nobac
+
+
+###################rarefaction
+
+coi.meta <- coi.seqs %>%
+  select(ID, UAE18005.1:UAE18867.1) %>%
+  pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
+  pivot_wider(names_from = "ID", values_from = "value") %>%
+  rename(ID.match = name) %>%
+  left_join(preydiv.coi.nobac, by = "ID.match") %>%
+  unite(Location, Tax, col = "ID", remove = F) %>%
+  select(-nb.otu.coi, -nb.seq.coi) %>%
+  select(ID, Location, Tax) 
+
+coi.rare <- coi.seqs %>%
+  select(ID, UAE18005.1:UAE18867.1) %>%
+  pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
+  pivot_wider(names_from = "ID", values_from = "value") %>%
+  rename(ID.match = name) %>%
+  left_join(preydiv.coi.nobac, by = "ID.match") %>%
+  unite(Location, Tax, col = "ID", remove = T)%>%
+  select(-ID.match, -nb.otu.coi, -nb.seq.coi) %>%
+  group_by(ID) %>%
+  summarize_all(funs(sum(.))) %>%
+  pivot_longer(cols = 2:547) %>%
+  pivot_wider(names_from = "ID", values_from = "value")
+
+
+coi.rare1 <- as.data.frame(coi.rare)
+rownames(coi.rare1) <- coi.rare1$name
+coi.seqs.nt <- coi.rare1[-1]
+
+
+coi.seqs.list = as.data.frame(t(coi.seqs.nt))
+str(coi.seqs.list)
+
+coi.list2 <- as.data.frame(coi.seqs.list)
+
+
+# split dataframe into list, with each ARMS as an element
+coi.list.split <- split(coi.list2, rownames(coi.list2))
+coi.list.t <- lapply(coi.list.split, t)
+
+# rarefaction curves by samples
+rarefactioncoi <- iNEXT(coi.list.t, q=0, datatype="abundance", size=NULL, endpoint=max(colSums(coi.rare[-1])), knots=50, se=TRUE, conf=0.95, nboot=100);beep(sound = 7)
+rarefactioncoi
+
+
+rare <- fortify(rarefactioncoi, type=1) %>%
+  rename(ID = site)
+rare.meta <- rare %>%
+  inner_join(coi.meta)
+head(rare.meta)
+
+rare.point <-rare.meta[which(rare.meta$method=="observed"),]
+rare.line <-rare.meta[which(rare.meta$method!="observed"),]
+rare.line$method <- factor(rare.line$method, c("interpolated", "extrapolated"), c("interpolation", "extrapolation"))
+
+rarefactionplot.coi <- ggplot(rare.meta, aes(x=x, y=y, color=Location)) +
+geom_line(aes(linetype=method), lwd=0.5, data=rare.line) + geom_ribbon(aes(ymin=y.lwr, ymax=y.upr,fill=Location, color=NULL), alpha=0.2) + labs(x="Number of sequences", y="Number of OTUs") +
+  theme_bw() + 
+  facet_wrap(.~Tax) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols)
+  
+rarefactionplot.coi
+
+
+###23S
+meta23s <- seqs23s %>%
+  select(ESV, UAE18005.1:UAE18867.1) %>%
+  pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
+  pivot_wider(names_from = "ESV", values_from = "value") %>%
+  rename(ID.match = name) %>%
+  left_join(preydiv.23s.nobac, by = "ID.match") %>%
+  unite(Location, Tax, col = "ID", remove = F) %>%
+  select(-nb.esv.23s, -nb.seq.23s) %>%
+  select(ID, Location, Tax) 
+
+rare23s <- seqs23s %>%
+  select(ESV, UAE18005.1:UAE18867.1) %>%
+  pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
+  pivot_wider(names_from = "ESV", values_from = "value") %>%
+  rename(ID.match = name) %>%
+  left_join(preydiv.23s.nobac, by = "ID.match") %>%
+  unite(Location, Tax, col = "ID", remove = T)%>%
+  select(-ID.match, -nb.esv.23s, -nb.seq.23s) %>%
+  group_by(ID) %>%
+  summarize_all(funs(sum(.))) %>%
+  pivot_longer(cols = 2:3007) %>%
+  pivot_wider(names_from = "ID", values_from = "value")
+
+max(colSums(rare23s[-1]))
+
+
+rare123s <- as.data.frame(rare23s)
+rownames(rare123s) <- rare123s$name
+seqs23snt <- rare123s[-1]
+
+
+seqs23slist = as.data.frame(t(seqs23snt))
+str(seqs23slist)
+
+seqs23slist2 <- as.data.frame(seqs23slist)
+
+
+# split dataframe into list, with each ARMS as an element
+list23ssplit <- split(seqs23slist, rownames(seqs23slist))
+list23st <- lapply(list23ssplit, t)
+
+# rarefaction curves by samples
+rarefaction23s <- iNEXT(list23st, q=0, datatype="abundance", size=NULL, endpoint=max(colSums(rare23s[-1])), knots=50, se=TRUE, conf=0.95, nboot=100);beep(sound = 8)
+rarefaction23s
+
+
+rarified23s <- fortify(rarefaction23s, type=1) %>%
+  rename(ID = site)
+rare23smeta <- rarified23s %>%
+  inner_join(meta23s)
+head(rare23smeta)
+
+rare23spoint <-rare23smeta[which(rare23smeta$method=="observed"),]
+rare23sline <-rare23smeta[which(rare23smeta$method!="observed"),]
+rare23sline$method <- factor(rare23sline$method, c("interpolated", "extrapolated"), c("interpolation", "extrapolation"))
+
+rarefactionplot23s <- ggplot(rare23smeta, aes(x=x, y=y, color=Location)) + 
+geom_line(aes(linetype=method), lwd=0.5, data=rare23sline) + 
+  geom_ribbon(aes(ymin=y.lwr, ymax=y.upr,fill=Location, color=NULL), alpha=0.2) + labs(x="Number of sequences", y="Number of ESVs") +
+  theme_bw() + 
+  facet_wrap(.~Tax) +
+    scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols)
+rarefactionplot23s
+
+rarelegend<-g_legend(rarefactionplot23s)
+
+rarefactionplots <- gbm::grid.arrange(mylegend, gridExtra::arrangeGrob(rarefactionplot.coi + theme(legend.position="none"),
+                         rarefactionplot23s + theme(legend.position="none"),
+                         nrow=2),
+            nrow=2, heights=c(1, 12))
+
+ggsave("Plots/Fig6_MS.pdf", plot = rarefactionplots, width = 6, height = 10, useDingbats=FALSE)
+```
+
+
+
+
+```{r GROWTH MODELING}
+# Load package
+library(sdmpredictors)
+
+
+my.sites <- comms %>%
+  group_by(Location, Site) %>%
+  summarize(Lon = mean(Long), Lat = mean(Lat)) %>%
+  as.data.frame(.) %>%
+  unite("Name", c(Location, Site), remove = F) %>%
+  arrange(Name)
+
+environment.bottom <- load_layers(c("BO2_tempmax_bdmean",
+                                    "BO2_tempmean_bdmean",
+                                    "BO2_tempmin_bdmean"),
+                                  equalarea=FALSE, rasterstack=TRUE)
+
+environment.vars <- data.frame(Name=my.sites$Name, extract(environment.bottom, my.sites[,4:5]))
+environment.vars
+
+my.sites <- data.frame(Name=c("Faro, Portugal, NE Atlantic" , "Maspalomas, Spain, NE Atlantic" , "Guadeloupe, France, Caribbean Sea" , "Havana, Cuba, Caribbean Sea") , Lon=c(-7.873,-15.539,-61.208,-82.537) , Lat=c(37.047, 27.794,15.957,23.040 ) )
+my.sites.environment <- data.frame(Name=my.sites$Name , extract(environment.bottom,my.sites[,2:3]))
+
+comms.post <- comms %>%
+  unite("Name", c(Location, Site), remove = FALSE) %>%
+  mutate(LinfTL = TL/10) %>%
+  left_join(environment.vars, by = "Name") %>%
+  rename(sstmean = BO2_tempmean_bdmean)
+
+growth.species <- read.csv("Data/Morais_DS1.csv")
+growth.group <- read.csv("Data/Morais_DS2.csv")
+
+growth.fam <- growth.species %>%
+  group_by(Family) %>%
+  summarize(Kmaxmean = mean(Kmax), LinfTLmean = mean(LinfTL), SSTmean = mean(sstmean))
+
+growth.group.avg <- growth.group %>%
+  group_by(MaxSizeTL, sstmean) %>%
+  summarize(Kmaxmean = mean(Kmax), lwrmean = mean(Kmax_lowqt), uprmean = mean(Kmax_upqt))
+
+growthmod <- brm(log(Kmax) ~ (log(LinfTL) * log(sstmean)), data = growth.species, control = list(adapt_delta = 0.90, max_treedepth = 11), iter = 4000)
+summary(growthmod)
+plot(growthmod)
+
+growth.pred <- growth.species %>%
+  data_grid(LinfTL = unique(comms$TL)/10, 
+            sstmean = c(unique(comms.post$BO2_tempmax_bdmean), unique(comms.post$BO2_tempmean_bdmean), unique(comms.post$BO2_tempmin_bdmean))) %>%
+  add_predicted_draws(growthmod, n = 50) %>%
+  mutate(meankmaxback = exp(.prediction)) %>%
+  group_by(LinfTL, sstmean) %>%
+  summarize(meankmax = mean(meankmaxback), sdkmax = sd(meankmaxback)) 
+growth.pred
+
+growth.simul <- comms.post %>%
+  inner_join(growth.pred, by = c("LinfTL", "sstmean"))
+    
+  add_predicted_draws(biomass.model, n = 1000) %>%
+  mutate(pred.biomass = exp(.prediction))
+
+
+bio.pred.plot <- ggplot(data = bio.pred) +
+  geom_halfeyeh(aes(y = rev(Location), x = pred.biomass, fill = Location)) +
+  geom_jitter(aes(x = Biomass_per_m2, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
+             data = comm_means, height = 0.02, 
+             alpha = 0.5, size = 2) +
+  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.5)) +
+  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
+  scale_x_log10(limits = c(0.1,1e3), breaks=c(0,0.1,1,10,1000), labels=c(0,0.1,1,10,1000)) +
+  theme_bw() +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = "top") +
+  guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  xlab(expression(paste("Biomass of cryptobenthic fishes (grams ", m^{-2},")")))
+bio.pred.plot
+
+x = as.data.frame(table(growth.species$LinfTL, growth.species$sstmean)) %>%
+  filter(Freq > 0) %>%
+  arrange(Var1, Var2)
+
+```
