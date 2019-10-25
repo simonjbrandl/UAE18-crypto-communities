@@ -33,6 +33,7 @@ library(scales)
 library(iNEXT)
 library(geomnet)
 library(GGally)
+library(extrafont)
 ```
 
 ```{r LOAD DATASETS AND SILHOUETTES}
@@ -117,19 +118,21 @@ abu.pred.plot <- ggplot(data = abu.pred) +
   geom_halfeyeh(aes(y = rev(Location), x = pred.density, fill = Location), color = "black") +
   geom_jitter(aes(x = Density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
              data = comm_means, height = 0.02, 
-             alpha = 0.5, size = 2) +
+             alpha = 0.5, size = 0.8) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = alpha(uaecols, 0.5)) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
   scale_x_log10(limits = c(0.1,5e2), breaks=c(0,0.1,1,10,100), labels=c(0,0.1,1,10,100)) +
-  theme_bw() +
+  theme_sjb() +
   theme(axis.text.y = element_blank(), 
         axis.ticks.y = element_blank(),
         axis.title.y = element_blank(),
-        legend.position = "top") +
+        legend.position = "top",
+        legend.box = "vertical") +
   guides(fill = guide_legend(nrow = 1),
          shape = guide_legend(nrow = 1)) +
-  xlab(expression(paste("Density of cryptobenthic fishes (individuals ", m^{-2},")")))
+  xlab(expression(paste("Density of cryptobenthic fishes (individuals ", m^{-2},")")))+
+  annotate("text", x = 0.1, y = 2.7, size = 3, label = "(b)", color = "black")
 abu.pred.plot
 
 ggsave("Plots/abupred.pdf", abu.pred.plot, width = 8, height = 4, useDingbats = F)
@@ -157,19 +160,22 @@ bio.pred.plot <- ggplot(data = bio.pred) +
   geom_halfeyeh(aes(y = rev(Location), x = pred.biomass, fill = Location), color = "black") +
   geom_jitter(aes(x = Biomass_per_m2, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
              data = comm_means, height = 0.02, 
-             alpha = 0.5, size = 2) +
+             alpha = 0.5, size = 0.8) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = alpha(uaecols, 0.5)) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
   scale_x_log10(limits = c(0.1,1e3), breaks=c(0,0.1,1,10,100,1000), labels=c(0,0.1,1,10,100,1000)) +
-  theme_bw() +
+  theme_sjb() +
   theme(axis.text.y = element_blank(), 
         axis.ticks.y = element_blank(),
         axis.title.y = element_blank(),
-        legend.position = "top") +
+        legend.position = "top",
+        legend.box = "vertical") +
   guides(fill = guide_legend(nrow = 1),
          shape = guide_legend(nrow = 1)) +
-  xlab(expression(paste("Biomass of cryptobenthic fishes (grams ", m^{-2},")")))
+  xlab(expression(paste("Biomass of cryptobenthic fishes (grams ", m^{-2},")")))+
+  annotate("text", x = 0.1, y = 2.7, size = 3, label = "(c)", color = "black")
+
 bio.pred.plot
 
 ggsave("Plots/biopred.pdf", bio.pred.plot, width = 8, height = 4, useDingbats = F)
@@ -197,19 +203,23 @@ div.pred.plot <- ggplot(data = div.pred) +
   geom_halfeyeh(aes(y = rev(Location), x = pred.diversity, fill = Location), color = "black") +
   geom_jitter(aes(x = Species_density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
              data = comm_means, height = 0.02, 
-             alpha = 0.5, size = 2) +
+             alpha = 0.5, size = 0.8) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = alpha(uaecols, 0.5)) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
   scale_x_log10(limits = c(0.1,100), breaks=c(0,0.1,1,10,100), labels=c(0,0.1,1,10,100)) +
-  theme_bw() +
+  theme_sjb() +
   theme(axis.text.y = element_blank(), 
         axis.ticks.y = element_blank(),
         axis.title.y = element_blank(),
-        legend.position = "top") +
+        legend.position = "top",
+        legend.spacing.y = unit(0.01, 'cm'),
+        legend.spacing.x = unit(0.02, 'cm')) +
   guides(fill = guide_legend(nrow = 1),
          shape = guide_legend(nrow = 1)) +
-  xlab(expression(paste("Species richness of cryptobenthic fishes (species ", m^{-2},")")))
+  xlab(expression(paste("Species richness of cryptobenthic fishes (species ", m^{-2},")"))) +
+  annotate("text", x = 0.1, y = 2.7, size = 3, label = "(a)", color = "black")
+       
 div.pred.plot
 
 ggsave("Plots/divpred.pdf", div.pred.plot, width = 8, height = 4, useDingbats = F)
@@ -227,9 +237,9 @@ Fig1 <- gbm::grid.arrange(mylegend, gridExtra::arrangeGrob(div.pred.plot + theme
                          abu.pred.plot + theme(legend.position="none"),
                          bio.pred.plot + theme(legend.position="none"),
                          nrow=3),
-            nrow=2, heights=c(1, 12))
+            nrow=2, heights=c(0.5, 12))
 
-ggsave("Plots/Fig1_MS.pdf", Fig1, width = 8, height = 12, useDingbats = F)
+ggsave("Plots/Fig1_MS.png", Fig1, width = 7, height = 7)
 ```
 
 ```{r COMMUNITY COMPOSITION NMDS}
@@ -242,6 +252,8 @@ comms_wide <- comms %>%
 ###run MDS
 comp_mds <- metaMDS(comms_wide[-c(1:3)], metric = "bray", trymax = 1000)
 comp_mds
+stressplot(comp_mds)
+
 ###get values and plot in ggplot
 site.scores <- as.tibble(scores(comp_mds)) %>%
   mutate(Location = comms_wide$Location,
@@ -288,64 +300,107 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
   #overlay points
   geom_point(aes(color = Location, group = Location, fill = Location,
                              shape = reorder(Site, sort(as.numeric(site_intercepts))))) +
-  theme_bw()+
-  theme(legend.position = "right") +
+  theme_sjb()+
+  theme(legend.position = "right",
+        legend.title.align = 0) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = uaecols) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
     guides(fill = guide_legend(ncol = 1),
-         shape = guide_legend(ncol = 1))
+         shape = guide_legend(ncol = 1)) +
+  scale_y_continuous(limits = c(-0.8, 0.8), breaks = seq(-0.8,0.8,0.4)) +
+  scale_x_continuous(limits = c(-1, 1), breaks = seq(-1,1,0.5)) 
 
 comp_plot
-ggsave("Plots/Fig2_MS.pdf", plot = comp_plot, width = 8, height = 6, useDingbats=FALSE)
+ggsave("Plots/Fig2_MS.png", plot = comp_plot, width = 6, height = 4)
 ```
 
 ```{r SIZE: E. ventermaculis and C. anomalus}
+size.strs <- read.csv(file = "Data/UAE_cryptosize_comb.csv")
 table(comms$Tax, comms$Location)
-size.strs.event <- comms %>%
-  filter(Tax %in% c("ENNEVENT")) 
+size.strs.event <- size.strs %>%
+  filter(Species %in% c("ENNEVENT")) 
 
-size.model.event <- brm(W ~ (TL + Location), data = size.strs.event, family = Gamma(link = "log"))
+size.model.event <- brm(log(W) ~ (log(TL) + Location), data = size.strs.event)
 summary(size.model.event)
 
 size.preds.event <- size.strs.event %>%
   group_by(Location) %>%  
   data_grid(TL = seq_range(TL, n = 100)) %>%
-  add_fitted_draws(size.model.event, n = 500)
+  add_fitted_draws(size.model.event, n = 500) %>%
+  mutate(backtrans = exp(.value))
 
 event.plot <- ggplot(size.preds.event, aes(x = TL, y = W, color = ordered(Location))) +
-  geom_line(aes(y = .value, group = paste(Location, .draw)), alpha = .3, lwd = 0.1) +
-  geom_point(data = size.strs.event, aes(fill = Location), alpha = 0.8, size = 1, shape = 23, color = "black") +
+  geom_point(data = size.strs.event, aes(fill = Location), alpha = 0.8, size = 1.2, shape = 23, color = "black", stroke = 0.1) +
+  geom_line(aes(y = backtrans, group = paste(Location, .draw)), alpha = .1, lwd = 0.1) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = uaecols) +
-  ylab("body weight in g") +
-  xlab("total length (TL) in mm") +
-  theme_bw() +
-  theme(legend.position = "none")
+  ylab("Body weight in g") +
+  xlab("Total length (TL) in mm") +
+  theme_sjb() +
+  theme(legend.position = "none") +
+  scale_y_continuous(limits = c(0,0.4), breaks = seq(0,0.4,0.1)) +
+  scale_x_continuous(limits = c(10,32), breaks = seq(10,32,2.5)) +
+  annotate("text", x = 10, y = 0.4, size = 3, label = "(a)")
 event.plot
-size.strs.canom <- comms %>%
-  filter(Tax %in% c("CORYANOM")) 
 
-size.model.canom <- brm(W ~ (TL + Location), data = size.strs.canom, family = Gamma(link = "log"))
+
+size.strs.canom <- size.strs %>%
+  filter(Species %in% c("CORYANOM"))
+size.strs.canom = size.strs.canom[-145,]
+
+size.model.canom <- brm(log(W) ~ (log(TL) + Location), data = size.strs.canom)
 summary(size.model.canom)
 
 size.preds.canom <- size.strs.canom %>%
   group_by(Location) %>%  
   data_grid(TL = seq_range(TL, n = 100)) %>%
-  add_fitted_draws(size.model.canom, n = 500)
+  add_fitted_draws(size.model.canom, n = 500) %>%
+  mutate(backtrans = exp(.value))
 
 canom.plot <- ggplot(size.preds.canom, aes(x = TL, y = W, color = ordered(Location))) +
-  geom_line(aes(y = .value, group = paste(Location, .draw)), alpha = .3, lwd = 0.1) +
-  geom_point(data = size.strs.canom, aes(fill = Location), size = 1, alpha = 0.8, shape = 23, color = "black") +
+  geom_point(data = size.strs.canom, aes(fill = Location), size = 1.2, alpha = 0.8, shape = 23, color = "black", stroke = 0.1) +
+  geom_line(aes(y = backtrans, group = paste(Location, .draw)), alpha = .1, lwd = 0.1) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = uaecols) +
-  ylab("body weight in g") +
-  xlab("total length (TL) in mm") +
-  theme_bw() +
-  theme(legend.position = "none")
+  ylab("Body weight in g") +
+  xlab("Total length (TL) in mm") +
+  theme_sjb() +
+  theme(legend.position = "none") +
+  scale_y_continuous(limits = c(0,4.07), breaks = seq(0,4.07,1)) +
+  scale_x_continuous(limits = c(10,80), breaks = seq(10,80,10)) +
+  annotate("text", x = 10, y = 4, size = 3, label = "(b)")
 canom.plot
-Fig3 <- ggarrange(event.plot, canom.plot, ncol = 1, nrow = 2)
-ggsave("Plots/Fig3_MS.pdf", Fig3, width = 4, height = 7, useDingbats = F)
+
+size.strs.epulc <- size.strs %>%
+  filter(Species %in% c("ECSEPULC")) 
+
+size.model.epulc <- brm(log(W) ~ (log(TL) + Location), data = size.strs.epulc)
+summary(size.model.epulc)
+
+size.preds.epulc <- size.strs.epulc %>%
+  group_by(Location) %>%  
+  data_grid(TL = seq_range(TL, n = 100)) %>%
+  add_fitted_draws(size.model.epulc, n = 500) %>%
+  mutate(backtrans = exp(.value))
+
+epulc.plot <- ggplot(size.preds.epulc, aes(x = TL, y = W, color = ordered(Location))) +
+  geom_point(data = size.strs.epulc, aes(fill = Location), size = 1.2, alpha = 0.8, shape = 23, color = "black", stroke = 0.1) +
+  geom_line(aes(y = backtrans, group = paste(Location, .draw)), alpha = .1, lwd = 0.1) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
+  ylab("Body weight in g") +
+  xlab("Total length (TL) in mm") +
+  theme_sjb() +
+  theme(legend.position = "none") +
+  scale_y_continuous(limits = c(0,5), breaks = seq(0,5,1)) +
+  scale_x_continuous(limits = c(15,85), breaks = seq(15,85,10)) +
+  annotate("text", x = 15, y = 5, size = 3, label = "(c)")
+epulc.plot
+
+
+Fig6 <- ggarrange(event.plot, canom.plot, epulc.plot, ncol = 1, nrow = 3)
+ggsave("Plots/Fig6_MS.png", Fig6, width = 3, height = 6)
 ###comp abundance of three species in AG & GoO
 ```
 
@@ -379,11 +434,11 @@ ctmax.pred <- ctmax %>%
 ctmax.pred.plot <- ggplot(data = ctmax.pred) +
   geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location), color = "black")+
   geom_jitter(aes(x = Ctmax, y = ordervar, shape = Tax, fill = Location),
-             data = ctmax, size = 1.5, color = "black", shape = 23, height = 0.1) +
+             data = ctmax, size = 1.5, color = "black", shape = 23, height = 0.1, stroke = 0.1) +
   scale_color_manual(values = uaecols, labels = c("Arabian Gulf", "Gulf of Oman")) +
   scale_fill_manual(values = alpha(uaecols, 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
   scale_shape_manual(values = c(8, 21:25)) +
-    theme_bw() +
+    theme_sjb() +
   theme(axis.title.y = element_blank(),
         axis.text.y = element_blank(), 
         axis.ticks.y = element_blank(),
@@ -399,18 +454,18 @@ ctmax.pred.plot <- ggplot(data = ctmax.pred) +
   annotation_custom(egutt, xmin=33.75, xmax=35.25, ymin=2, ymax=3) +
   annotation_custom(hfusc, xmin=33.75, xmax=35.25, ymin=1, ymax=2) +
   annotate("text", x = 34.5, y = 6.15, 
-            label = 'italic("C. anomalus")', size = 3.5, parse = TRUE) +
+            label = 'italic("C. anomalus")', size = 2.5, parse = TRUE) +
     annotate("text", x = 34.5, y = 5.15, 
-            label = 'italic("E. pulcher")', size = 3.5, parse = TRUE) +
+            label = 'italic("E. pulcher")', size = 2.5, parse = TRUE) +
     annotate("text", x = 34.5, y = 4.15, 
-            label = 'italic("E. ventermaculus")', size = 3.5, parse = TRUE) +
+            label = 'italic("E. ventermaculus")', size = 2.5, parse = TRUE) +
     annotate("text", x = 34.5, y = 3.15, 
-            label = 'italic("H. vulgaris")', size = 3.5, parse = TRUE) +
+            label = 'italic("H. vulgaris")', size = 2.5, parse = TRUE) +
     annotate("text", x = 34.5, y = 2.15, 
-            label = 'italic("E. guttata")', size = 3.5, parse = TRUE) +
+            label = 'italic("E. guttata")', size = 2.5, parse = TRUE) +
     annotate("text", x = 34.5, y = 1.15, 
-            label = 'italic("H. fuscopinna")', size = 3.5, parse = TRUE) +
-    annotate("text", x = 34, y = 7, size = 5, label = "(b)")
+            label = 'italic("H. fuscopinna")', size = 2.5, parse = TRUE) +
+    annotate("text", x = 34, y = 7.1, size = 3, label = "(b)")
   
 ctmax.pred.plot
 
@@ -447,10 +502,10 @@ ctmin.pred <- ctmin %>%
 ctmin.pred.plot <- ggplot(data = ctmin.pred) +
   geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location), color = "black")+
   geom_jitter(aes(x = Ctmin, y = ordervar, shape = Tax, fill = Location),
-             data = ctmin, size = 1.5, color = "black", shape = 23, height = 0.1) +
+             data = ctmin, size = 1.5, color = "black", shape = 23, height = 0.1, stroke = 0.1) +
   scale_color_manual(values = uaecols, labels = c("Arabian Gulf", "Gulf of Oman")) +
   scale_fill_manual(values = alpha(uaecols, 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
-    theme_bw() +
+    theme_sjb() +
   theme(axis.title.y = element_blank(),
         axis.text.y = element_blank(), 
         axis.ticks.y = element_blank(),
@@ -466,18 +521,18 @@ ctmin.pred.plot <- ggplot(data = ctmin.pred) +
   annotation_custom(egutt, xmin=15.25, xmax=16.75, ymin=2, ymax=3) +
   annotation_custom(hfusc, xmin=15.25, xmax=16.75, ymin=1, ymax=2) +
   annotate("text", x = 16, y = 6.15, 
-            label = 'italic("C. anomalus")', size = 3.5, parse = TRUE) +
+            label = 'italic("C. anomalus")', size = 2.5, parse = TRUE) +
     annotate("text", x = 16, y = 5.15, 
-            label = 'italic("E. pulcher")', size = 3.5, parse = TRUE) +
+            label = 'italic("E. pulcher")', size = 2.5, parse = TRUE) +
     annotate("text", x = 16, y = 4.15, 
-            label = 'italic("E. ventermaculus")', size = 3.5, parse = TRUE) +
+            label = 'italic("E. ventermaculus")', size = 2.5, parse = TRUE) +
     annotate("text", x = 16, y = 3.15, 
-            label = 'italic("H. vulgaris")', size = 3.5, parse = TRUE) +
+            label = 'italic("H. vulgaris")', size = 2.5, parse = TRUE) +
     annotate("text", x = 16, y = 2.15, 
-            label = 'italic("E. guttata")', size = 3.5, parse = TRUE) +
+            label = 'italic("E. guttata")', size = 2.5, parse = TRUE) +
     annotate("text", x = 16, y = 1.15, 
-            label = 'italic("H. fuscopinna")', size = 3.5, parse = TRUE) +
-    annotate("text", x = 9.5, y = 7, size = 5, label = "(a)")
+            label = 'italic("H. fuscopinna")', size = 2.5, parse = TRUE) +
+    annotate("text", x = 9.5, y = 7.1, size = 3, label = "(a)")
   
 ctmin.pred.plot
 
@@ -495,7 +550,7 @@ ctplots <- gbm::grid.arrange( mylegend, gridExtra::arrangeGrob(ctmin.pred.plot +
                          nrow=1),
             nrow=2, heights=c(1, 12))
 
-ggsave("Plots/Fig4_MS.pdf", plot = ctplots, width = 12, height = 8, useDingbats=FALSE)
+ggsave("Plots/Fig3_MS.png", plot = ctplots, width = 8, height = 7)
 ```
 
 ```{r}
@@ -1253,7 +1308,7 @@ uaecols.network <- c(uaecols, "grey46")
 
 network.plot.coi <- ggplot(data = network.coi.colored) +
   geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = taxloc, colour = share.color, shape = Tax),
-  lwd=2, labelon = F, alpha = 0.8, ealpha = 0.1, arrowsize = 0.1, linewidth = 0.05,
+  lwd=2, labelon = F, alpha = 0.8, ealpha = 0.1, arrowsize = 0.1, linewidth = 0.05, 
   vjust = 0.5, hjust = 0.5) +
   # labelcolour = cfnet2$lcolour) +
   theme_net() +
@@ -1623,10 +1678,15 @@ rare.line$method <- factor(rare.line$method, c("interpolated", "extrapolated"), 
 
 rarefactionplot.coi <- ggplot(rare.meta, aes(x=x, y=y, color=Location)) +
 geom_line(aes(linetype=method), lwd=0.5, data=rare.line) + geom_ribbon(aes(ymin=y.lwr, ymax=y.upr,fill=Location, color=NULL), alpha=0.2) + labs(x="Number of sequences", y="Number of OTUs") +
-  theme_bw() + 
+  theme_bw() + theme(plot.title = element_text(size = 8),
+          axis.text = element_text(color = "black", size = 8, family = "Arial"),
+          axis.title = element_text(color = "black", size = 8, family = "Arial"),
+          legend.title=element_text(size=8), 
+          legend.text=element_text(size=8)) +
   facet_wrap(.~Tax) +
   scale_color_manual(values = uaecols) +
-  scale_fill_manual(values = uaecols)
+  scale_fill_manual(values = uaecols) +
+  ggtitle("(a)")
   
 rarefactionplot.coi
 
@@ -1691,10 +1751,15 @@ rare23sline$method <- factor(rare23sline$method, c("interpolated", "extrapolated
 rarefactionplot23s <- ggplot(rare23smeta, aes(x=x, y=y, color=Location)) + 
 geom_line(aes(linetype=method), lwd=0.5, data=rare23sline) + 
   geom_ribbon(aes(ymin=y.lwr, ymax=y.upr,fill=Location, color=NULL), alpha=0.2) + labs(x="Number of sequences", y="Number of ESVs") +
-  theme_bw() + 
+  theme_bw() + theme(plot.title = element_text(size = 8),
+          axis.text = element_text(color = "black", size = 8, family = "Arial"),
+          axis.title = element_text(color = "black", size = 8, family = "Arial"),
+          legend.title=element_text(size=8), 
+          legend.text=element_text(size=8)) +
   facet_wrap(.~Tax) +
     scale_color_manual(values = uaecols) +
-  scale_fill_manual(values = uaecols)
+  scale_fill_manual(values = uaecols) +
+  ggtitle("(b)")
 rarefactionplot23s
 
 rarelegend<-g_legend(rarefactionplot23s)
@@ -1704,7 +1769,11 @@ rarefactionplots <- gbm::grid.arrange(mylegend, gridExtra::arrangeGrob(rarefacti
                          nrow=2),
             nrow=2, heights=c(1, 12))
 
-ggsave("Plots/Fig6_MS.pdf", plot = rarefactionplots, width = 6, height = 10, useDingbats=FALSE)
+Fig4 <- gridExtra::arrangeGrob(rarefactionplot.coi + theme(legend.position="none"),
+                               rarefactionplot23s + theme(legend.position="none"), 
+                               nrow = 2)
+
+ggsave("Plots/Fig4_MS.png", plot = Fig4, width = 5, height = 6)
 ```
 
 
