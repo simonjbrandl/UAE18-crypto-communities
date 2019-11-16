@@ -34,12 +34,15 @@ library(iNEXT)
 library(geomnet)
 library(GGally)
 library(extrafont)
+library(xgboost)
+devtools::load_all("rfishprod")
 ```
 
 ```{r LOAD DATASETS AND SILHOUETTES}
 #load datasets
 comms <- read.csv(file = "Data/UAE18_RawData_Comms.csv")
 ctdat <- read.csv(file = "Data/UAE_CT.csv")
+benthcomm <- read.csv(file = "Data/benthic_commcomp.csv")
 comms$Genspe <- paste(substr(comms$Genus, 0,3), comms$Species, sep = ". ")
 ctdat$Genspe <- paste(substr(ctdat$Genus, 0,3), ctdat$Species, sep = ". ")
 ctdat <- ctdat %>% mutate(Distribution = case_when(Tax == "ECSEPULC" ~ "AG+GoM",
@@ -317,7 +320,7 @@ ggsave("Plots/Fig2_MS.png", plot = comp_plot, width = 6, height = 4)
 
 ```{r SIZE: E. ventermaculis and C. anomalus}
 size.strs <- read.csv(file = "Data/UAE_cryptosize_comb.csv")
-table(comms$Tax, comms$Location)
+t <- table(comms$Tax, comms$Location)
 size.strs.event <- size.strs %>%
   filter(Species %in% c("ENNEVENT")) 
 
@@ -346,8 +349,9 @@ event.plot
 
 
 size.strs.canom <- size.strs %>%
-  filter(Species %in% c("CORYANOM"))
-size.strs.canom = size.strs.canom[-145,]
+  filter(Species %in% c("CORYANOM")) %>%
+  filter(TL < 50)
+size.strs.canom = size.strs.canom[-134,]
 
 size.model.canom <- brm(log(W) ~ (log(TL) + Location), data = size.strs.canom)
 summary(size.model.canom)
@@ -367,9 +371,9 @@ canom.plot <- ggplot(size.preds.canom, aes(x = TL, y = W, color = ordered(Locati
   xlab("Total length (TL) in mm") +
   theme_sjb() +
   theme(legend.position = "none") +
-  scale_y_continuous(limits = c(0,4.07), breaks = seq(0,4.07,1)) +
-  scale_x_continuous(limits = c(10,80), breaks = seq(10,80,10)) +
-  annotate("text", x = 10, y = 4, size = 3, label = "(b)")
+  scale_y_continuous(limits = c(0,1), breaks = seq(0,1,0.25)) +
+  scale_x_continuous(limits = c(10,42), breaks = seq(10,42,10)) +
+  annotate("text", x = 10, y = 1, size = 3, label = "(b)")
 canom.plot
 
 size.strs.epulc <- size.strs %>%
@@ -1782,7 +1786,7 @@ ggsave("Plots/Fig4_MS.png", plot = Fig4, width = 5, height = 6)
 ```{r GROWTH MODELING}
 # Load package
 library(sdmpredictors)
-
+library(rasterVis)
 
 my.sites <- comms %>%
   group_by(Location, Site) %>%
@@ -1790,76 +1794,284 @@ my.sites <- comms %>%
   as.data.frame(.) %>%
   unite("Name", c(Location, Site), remove = F) %>%
   arrange(Name)
-
-environment.bottom <- load_layers(c("BO2_tempmax_bdmean",
-                                    "BO2_tempmean_bdmean",
-                                    "BO2_tempmin_bdmean"),
+layers <- list_layers(marine = TRUE)
+environment.bottom <- load_layers(c("MS_biogeo15_sst_max_5m",
+                                    "MS_biogeo14_sst_min_5m",
+                                    "MS_biogeo16_sst_range_5m",
+                                    "BO_sstmean"),
                                   equalarea=FALSE, rasterstack=TRUE)
 
 environment.vars <- data.frame(Name=my.sites$Name, extract(environment.bottom, my.sites[,4:5]))
 environment.vars
 
-my.sites <- data.frame(Name=c("Faro, Portugal, NE Atlantic" , "Maspalomas, Spain, NE Atlantic" , "Guadeloupe, France, Caribbean Sea" , "Havana, Cuba, Caribbean Sea") , Lon=c(-7.873,-15.539,-61.208,-82.537) , Lat=c(37.047, 27.794,15.957,23.040 ) )
-my.sites.environment <- data.frame(Name=my.sites$Name , extract(environment.bottom,my.sites[,2:3]))
+# Crop raster to fit the North Atlantic
+middleeast <- extent(50, 60, 20, 30)
+temp.middleast <- crop(environment.bottom, middleeast)
 
-comms.post <- comms %>%
-  unite("Name", c(Location, Site), remove = FALSE) %>%
-  mutate(LinfTL = TL/10) %>%
-  left_join(environment.vars, by = "Name") %>%
-  rename(sstmean = BO2_tempmean_bdmean)
+#function to fortify data
+gplot_data <- function(x, maxpixels = 500000)  {
+  x <- raster::sampleRegular(x, maxpixels, asRaster = TRUE)
+  coords <- raster::xyFromCell(x, seq_len(raster::ncell(x)))
+  ## Extract values
+  dat <- utils::stack(as.data.frame(raster::getValues(x))) 
+  names(dat) <- c('value', 'variable')
 
-growth.species <- read.csv("Data/Morais_DS1.csv")
-growth.group <- read.csv("Data/Morais_DS2.csv")
+  dat <- dplyr::as.tbl(data.frame(coords, dat))
 
-growth.fam <- growth.species %>%
-  group_by(Family) %>%
-  summarize(Kmaxmean = mean(Kmax), LinfTLmean = mean(LinfTL), SSTmean = mean(sstmean))
+  if (!is.null(levels(x))) {
+    dat <- dplyr::left_join(dat, levels(x)[[1]], 
+                            by = c("value" = "ID"))
+  }
+  dat
+}
 
-growth.group.avg <- growth.group %>%
-  group_by(MaxSizeTL, sstmean) %>%
-  summarize(Kmaxmean = mean(Kmax), lwrmean = mean(Kmax_lowqt), uprmean = mean(Kmax_upqt))
+# apply function
+fort.temp.middleeast <- gplot_data(temp.middleast)
 
-growthmod <- brm(log(Kmax) ~ (log(LinfTL) * log(sstmean)), data = growth.species, control = list(adapt_delta = 0.90, max_treedepth = 11), iter = 4000)
-summary(growthmod)
-plot(growthmod)
-
-growth.pred <- growth.species %>%
-  data_grid(LinfTL = unique(comms$TL)/10, 
-            sstmean = c(unique(comms.post$BO2_tempmax_bdmean), unique(comms.post$BO2_tempmean_bdmean), unique(comms.post$BO2_tempmin_bdmean))) %>%
-  add_predicted_draws(growthmod, n = 50) %>%
-  mutate(meankmaxback = exp(.prediction)) %>%
-  group_by(LinfTL, sstmean) %>%
-  summarize(meankmax = mean(meankmaxback), sdkmax = sd(meankmaxback)) 
-growth.pred
-
-growth.simul <- comms.post %>%
-  inner_join(growth.pred, by = c("LinfTL", "sstmean"))
-    
-  add_predicted_draws(biomass.model, n = 1000) %>%
-  mutate(pred.biomass = exp(.prediction))
+mapdata.max = fort.temp.middleeast %>%
+  filter(variable == "MS_biogeo15_sst_max_5m")
 
 
-bio.pred.plot <- ggplot(data = bio.pred) +
-  geom_halfeyeh(aes(y = rev(Location), x = pred.biomass, fill = Location)) +
-  geom_jitter(aes(x = Biomass_per_m2, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
-             data = comm_means, height = 0.02, 
-             alpha = 0.5, size = 2) +
-  scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
-  scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.5)) +
+maxplot <- ggplot(data = mapdata.max, aes(x = x, y = y)) +
+  geom_tile(aes(fill = value, color = value)) +
+  geom_point(data = my.sites, aes(x = Lon, y = Lat), color = "black", size = 3, alpha = 0.85) +
+  scale_fill_fish(option = "Trimma_lantana", na.value="white", name = "Temperature", begin = 0.65) +
+  scale_color_fish(option = "Trimma_lantana", na.value="white", begin = 0.65, guide=FALSE) +
+  theme_sjb() + theme(panel.grid.major  = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          panel.border = element_blank(),
+          legend.position = "top") +
+  scale_y_continuous(limits = c(20, 30), breaks = seq(20, 30, 2.5), expand = c(0,0)) +
+  scale_x_continuous(limits = c(50, 60), breaks = seq(50, 60, 2.5), expand = c(0,0)) +
+  xlab("Longitude") +
+  ylab("Latitude") +
+  annotate("text", x = 53.5, y = 26, size = 4, label = "ARABIAN GULF", color = "black", fontface = 2) +
+  annotate("text", x = 58.5, y = 24.5, size = 4, label = "GULF OF OMAN", color = "black", fontface = 2) +
+  annotate("text", x = 52, y = 30, size = 4, label = "a) Maximum", color = "black", fontface = 2) +
+  coord_cartesian(clip="off")
+maxplot
+
+
+mapdata.min = fort.temp.middleeast %>%
+  filter(variable == "MS_biogeo14_sst_min_5m")
+
+
+minplot <- ggplot(data = mapdata.min, aes(x = x, y = y)) +
+  geom_tile(aes(fill = value, color = value)) +
+  geom_point(data = my.sites, aes(x = Lon, y = Lat), color = "black", size = 3, alpha = 0.85) +
+  scale_fill_fish(option = "Trimma_lantana", na.value="white", name = "Temperature", end = 0.35) +
+  scale_color_fish(option = "Trimma_lantana", na.value="white", end = 0.35, guide=FALSE) +
+  theme_sjb() + theme(panel.grid.major  = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          panel.border = element_blank(),
+          legend.position = "top") +
+  scale_y_continuous(limits = c(20, 30), breaks = seq(20, 30, 2.5), expand = c(0,0)) +
+  scale_x_continuous(limits = c(50, 60), breaks = seq(50, 60, 2.5), expand = c(0,0)) +
+  xlab("Longitude") +
+  ylab("Latitude") +
+  annotate("text", x = 53.5, y = 26, size = 4, label = "ARABIAN GULF", color = "black", fontface = 2) +
+  annotate("text", x = 58.5, y = 24.5, size = 4, label = "GULF OF OMAN", color = "black", fontface = 2) +
+  annotate("text", x = 52, y = 30, size = 4, label = "b) Minimum", color = "black", fontface = 2) +
+  coord_cartesian(clip="off")
+minplot
+
+
+mapdata.range = fort.temp.middleeast %>%
+  filter(variable == "MS_biogeo16_sst_range_5m")
+
+
+rangeplot <- ggplot(data = mapdata.range, aes(x = x, y = y)) +
+  geom_tile(aes(fill = value, color = value)) +
+  geom_point(data = my.sites, aes(x = Lon, y = Lat), color = "black", size = 3, alpha = 0.85) +
+  scale_fill_fish(option = "Trimma_lantana", na.value="white", name = "Temperature") +
+  scale_color_fish(option = "Trimma_lantana", na.value="white", guide=FALSE) +
+  theme_sjb() + theme(panel.grid.major  = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          panel.border = element_blank(),
+          legend.position = "top") +
+  scale_y_continuous(limits = c(20, 30), breaks = seq(20, 30, 2.5), expand = c(0,0)) +
+  scale_x_continuous(limits = c(50, 60), breaks = seq(50, 60, 2.5), expand = c(0,0)) +
+  xlab("Longitude") +
+  ylab("Latitude") +
+  annotate("text", x = 53.5, y = 26, size = 4, label = "ARABIAN GULF", color = "black", fontface = 2) +
+  annotate("text", x = 58.5, y = 24.5, size = 4, label = "GULF OF OMAN", color = "black", fontface = 2) +
+  annotate("text", x = 52, y = 30, size = 4, label = "c) Range", color = "black", fontface = 2) +
+  coord_cartesian(clip="off")
+rangeplot
+
+temp_plots <- ggarrange(maxplot, minplot, rangeplot, ncol = 3, nrow = 1)
+temp_plots
+ggsave("Plots/temperature_plots.pdf", temp_plots, width = 14, height = 6, useDingbats = F)
+
+# 
+# growth.species <- read.csv("Data/Morais_DS1.csv")
+# growth.group <- read.csv("Data/Morais_DS2.csv")
+# 
+# growth.fam <- growth.species %>%
+#   group_by(Family) %>%
+#   summarize(Kmaxmean = mean(Kmax), LinfTLmean = mean(LinfTL), SSTmean = mean(sstmean))
+# 
+# growth.group.avg <- growth.group %>%
+#   group_by(MaxSizeTL, sstmean) %>%
+#   summarize(Kmaxmean = mean(Kmax), lwrmean = mean(Kmax_lowqt), uprmean = mean(Kmax_upqt))
+# 
+# growthmod <- brm(log(Kmax) ~ (log(LinfTL) * log(sstmean)), data = growth.species, control = list(adapt_delta = 0.90, max_treedepth = 11), iter = 4000)
+# summary(growthmod)
+# plot(growthmod)
+# 
+# growth.pred <- growth.species %>%
+#   data_grid(LinfTL = unique(comms$TL)/10, 
+#             sstmean = c(unique(comms.post$BO2_tempmax_bdmean), unique(comms.post$BO2_tempmean_bdmean), unique(comms.post$BO2_tempmin_bdmean))) %>%
+#   add_predicted_draws(growthmod, n = 50) %>%
+#   mutate(meankmaxback = exp(.prediction)) %>%
+#   group_by(LinfTL, sstmean) %>%
+#   summarize(meankmax = mean(meankmaxback), sdkmax = sd(meankmaxback)) 
+# growth.pred
+# 
+# growth.simul <- comms.post %>%
+#   inner_join(growth.pred, by = c("LinfTL", "sstmean"))
+#     
+#   add_predicted_draws(biomass.model, n = 1000) %>%
+#   mutate(pred.biomass = exp(.prediction))
+# 
+# 
+# bio.pred.plot <- ggplot(data = bio.pred) +
+#   geom_halfeyeh(aes(y = rev(Location), x = pred.biomass, fill = Location)) +
+#   geom_jitter(aes(x = Biomass_per_m2, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
+#              data = comm_means, height = 0.02, 
+#              alpha = 0.5, size = 2) +
+#   scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
+#   scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.5)) +
+#   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
+#   scale_x_log10(limits = c(0.1,1e3), breaks=c(0,0.1,1,10,1000), labels=c(0,0.1,1,10,1000)) +
+#   theme_bw() +
+#   theme(axis.text.y = element_blank(), 
+#         axis.ticks.y = element_blank(),
+#         axis.title.y = element_blank(),
+#         legend.position = "top") +
+#   guides(fill = guide_legend(nrow = 1),
+#          shape = guide_legend(nrow = 1)) +
+#   xlab(expression(paste("Biomass of cryptobenthic fishes (grams ", m^{-2},")")))
+# bio.pred.plot
+# 
+# x = as.data.frame(table(growth.species$LinfTL, growth.species$sstmean)) %>%
+#   filter(Freq > 0) %>%
+#   arrange(Var1, Var2)
+```
+
+``` {r BENTHIC COMPOSITION}
+table(benthcomm$category)
+
+benth.tidy <- benthcomm %>%
+  mutate(category_tidy = case_when(category == "livecoral_encrusting" ~ "livecoral_other",
+                                   category == "livecoral_foliose" ~ "livecoral_other",
+                                   category == "livecoral_massive" ~ "livecoral_other",
+                                   TRUE ~ as.character(category))) %>%
+  filter(category != "unidentifiable") %>% 
+  group_by(category) %>%
+  mutate(total_cat = n()) %>%
+  ungroup() %>%
+  filter(total_cat >= 5) %>%
+  group_by(location, site, sitename, category_tidy) %>%
+  summarize(total = n()) %>%
+  ungroup() %>%
+  group_by(location, site, sitename) %>%
+  mutate(category_percent = total/sum(total)) %>%
+  dplyr::select(-total) %>%
+  pivot_wider(names_from = category_tidy, values_from = category_percent,
+    values_fill = list(category_percent = 0))
+
+
+benth.cc <- benth.tidy %>%
+  dplyr::select(location, site, sitename, livecoral_other, livecoral_branching) %>%
+  mutate(total_cc = livecoral_other+livecoral_branching)
+
+###run mds
+benth.mds <- metaMDS(benth.tidy[-c(1:4)], metric = "manhattan", trymax = 1000)
+benth.mds
+stressplot(benth.mds)
+
+###get values and plot in ggplot
+site.scores.benth <- as.tibble(scores(benth.mds)) %>%
+  mutate(location = benth.tidy$location,
+         site = benth.tidy$site,
+         sitename = benth.tidy$sitename) %>% 
+  inner_join(benth.tidy) %>%
+  mutate(ordervar = case_when(site == "Dhabiya" ~ 1,
+                              site == "RasGhanada" ~ 2,
+                              site == "Saadiyat" ~ 3,
+                              site == "Dibba" ~ 4,
+                              site == "Sharm" ~ 5,
+                              site == "Snoopy" ~ 6)) %>%
+  mutate(Coral_cover = livecoral_other + livecoral_branching)
+
+
+mds.points.benth <- as.data.frame(scores(benth.mds, "species")) %>%
+  add_column(category = rownames(.))
+
+point.plot.benth <- ggplot(mds.points.benth) +
+  theme_sjb() +
+  geom_segment(aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
+               arrow = arrow(length = unit(0.3, "cm")), color = "grey69",
+               inherit.aes = F) +
+  theme(legend.position = "top") +
+  geom_text_repel(aes(x=NMDS1, NMDS2, label=category), size=4, inherit.aes = F) +
+  scale_y_continuous(limits = c(-0.75, 0.75), breaks = seq(-0.75, 0.75, 0.25)) +
+  scale_x_continuous(limits = c(-1.2, 1.2)) +
+  xlab("NMDS1") +
+  ylab("NMDS2")
+point.plot.benth
+###create convex hulls function
+convex_hull <- function(site.scores.benth) site.scores.benth[chull(site.scores.benth$NMDS1, site.scores.benth$NMDS2),] 
+
+###run convex hulls on habitats
+site_hulls <- ddply(site.scores.benth, "site", convex_hull)
+
+
+###create vector with habitat names in center of convex hulls
+site_centers <- site_hulls %>% group_by(site) %>% summarize(NMDS1 = mean(NMDS1), NMDS2 = mean(NMDS2))
+
+###plot mds results
+# plot one species name
+comp.plot.benth <- ggplot(site.scores.benth, aes(x = NMDS1, y = NMDS2)) +
+  #overlay convex hulls
+  #overlay points
+  geom_point(aes(color = location, group = location, fill = location, size = Coral_cover,
+                             shape = reorder(site, sort(as.numeric(ordervar))))) +
+    geom_polygon(data = site_hulls, aes(x = NMDS1, y = NMDS2, 
+                                         fill = location,
+                                         group = site),
+               alpha = 0.4, lty = 1, lwd = 0.1, color = "black") +
+    geom_segment(data = mds.points.benth, aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
+               arrow = arrow(length = unit(0.3, "cm")), color = "grey69",
+               inherit.aes = F) +
+  theme(legend.position = "top") +
+  geom_text_repel(data = mds.points.benth, aes(x=NMDS1, NMDS2, label=category), size=4, inherit.aes = F) +
+  theme_bw()+
+  theme(legend.position = "top",
+        legend.title.align = 0,
+        legend.box = "horizontal") +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-  scale_x_log10(limits = c(0.1,1e3), breaks=c(0,0.1,1,10,1000), labels=c(0,0.1,1,10,1000)) +
-  theme_bw() +
-  theme(axis.text.y = element_blank(), 
-        axis.ticks.y = element_blank(),
-        axis.title.y = element_blank(),
-        legend.position = "top") +
-  guides(fill = guide_legend(nrow = 1),
+    guides(fill = guide_legend(nrow = 1),
          shape = guide_legend(nrow = 1)) +
-  xlab(expression(paste("Biomass of cryptobenthic fishes (grams ", m^{-2},")")))
-bio.pred.plot
+    scale_y_continuous(limits = c(-0.75, 0.75), breaks = seq(-0.75, 0.75, 0.25)) +
+  scale_x_continuous(limits = c(-1.2, 1.2)) +
+  xlab("NMDS1") +
+  ylab("NMDS2")
 
-x = as.data.frame(table(growth.species$LinfTL, growth.species$sstmean)) %>%
-  filter(Freq > 0) %>%
-  arrange(Var1, Var2)
+comp.plot.benth
+
+
+#run GLM with abundance data and offset for surface area sampled
+cc.model <- brm(logit_scaled(benth.cc) ~ location + (1|site), 
+                            data = benth.cc.mod, control = list(adapt_delta = 0.999, max_treedepth = 15))
+summary(cc.model)
+
+ggsave("Plots/BenthicPlot.pdf", plot = comp_plot, width = 6, height = 4, useDingbats = FALSE)
 
 ```
