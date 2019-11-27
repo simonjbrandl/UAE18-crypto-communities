@@ -17,8 +17,8 @@ theme_sjb <- function (base_size = 8, base_family = "") {
           panel.border = element_blank(),
           axis.line = element_line(color = "black"),
           axis.ticks = element_line(color = "black"),
-          axis.text = element_text(color = "black", size = 8, family = "Arial"),
-          axis.title = element_text(color = "black", size = 8, family = "Arial"),
+          axis.text = element_text(color = "black", size = 8),
+          axis.title = element_text(color = "black", size = 8),
           legend.title=element_text(size=8), 
           legend.text=element_text(size=8))
 }
