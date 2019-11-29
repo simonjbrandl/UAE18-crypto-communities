@@ -77,6 +77,18 @@ hfusc <- rasterGrob(img, interpolate=TRUE)
 
 uaecols <- fish(n = 2, option = "Trimma_lantana", end = 0.3)
 image(volcano, col = uaecols)
+
+theme_sjb <- function (base_size = 8, base_family = "") {
+  theme_bw() %+replace% 
+    theme(panel.background = element_blank(),
+          panel.border = element_blank(),
+          axis.line = element_line(color = "black"),
+          axis.ticks = element_line(color = "black"),
+          axis.text = element_text(color = "black", size = 8),
+          axis.title = element_text(color = "black", size = 8),
+          legend.title=element_text(size=8), 
+          legend.text=element_text(size=8))
+}
 ```
 
 ```{r COMMUNITY STRUCTURE: ABUNDANCE, BIOMASS, DIVERSITY}
@@ -243,10 +255,23 @@ Fig1 <- gbm::grid.arrange(mylegend, gridExtra::arrangeGrob(div.pred.plot + theme
                          nrow=3),
             nrow=2, heights=c(0.5, 12))
 
-ggsave("Plots/Fig1_MS.png", Fig1, width = 7, height = 7)
+ggsave("Plots/Fig1_MS.png", Fig1, width = 6, height = 5)
 ```
 
 ```{r COMMUNITY COMPOSITION NMDS}
+comms.overview <- comms %>%
+  dplyr::select(Location, Tax) %>%
+  distinct() %>%
+  mutate(no = 1) %>%
+  group_by(Tax) %>%
+  mutate(count = n()) %>%
+  mutate(shared = case_when(count == 2 ~ "shared",
+                            count == 1 ~ case_when(Location == "GoO" ~ "GoO",
+                                                   TRUE ~ "AG")))
+
+table(comms.overview$shared)
+  
+
 comms$count = 1
 comms_wide <- comms %>% 
   group_by(Location, Site, Sitenumber, Genspe) %>%
@@ -258,6 +283,7 @@ comp_mds <- metaMDS(comms_wide[-c(1:3)], metric = "bray", trymax = 1000)
 comp_mds
 stressplot(comp_mds)
 
+perm <- adonis(comms_wide[-c(1:3)] ~ Location, comms_wide, distance = "Bray", permutations = 999)
 ###get values and plot in ggplot
 site.scores <- as.tibble(scores(comp_mds)) %>%
   mutate(Location = comms_wide$Location,
@@ -305,7 +331,7 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
   geom_point(aes(color = Location, group = Location, fill = Location,
                              shape = reorder(Site, sort(as.numeric(site_intercepts))))) +
   theme_sjb()+
-  theme(legend.position = "right",
+  theme(legend.position = "none",
         legend.title.align = 0) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = uaecols) +
@@ -316,7 +342,7 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
   scale_x_continuous(limits = c(-1, 1), breaks = seq(-1,1,0.5)) 
 
 comp_plot
-ggsave("Plots/Fig2_MS.png", plot = comp_plot, width = 6, height = 4)
+ggsave("Plots/Fig2_MS.png", plot = comp_plot, width = 4, height = 5)
 ```
 
 ```{r SIZE: E. ventermaculis and C. anomalus}
@@ -563,6 +589,10 @@ ctmax.pred <- ctmax %>%
                               Tax == "EVIOGUTT" ~ 2,
                               TRUE ~ 1))
 
+ctmax_means <- ctmax %>%
+  group_by(Location, Tax) %>%
+  summarize(meantol = mean(Ctmax), sdtol = sd(Ctmax), setol = sdtol/sqrt(n()))
+
 ctmax.pred.plot <- ggplot(data = ctmax.pred) +
   geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location), color = "black")+
   geom_jitter(aes(x = Ctmax, y = ordervar, shape = Tax, fill = Location),
@@ -614,6 +644,10 @@ ctmin <- ctmin %>%
                               Tax == "EVIOGUTT" ~ 2,
                               TRUE ~ 1),
            taxloc = factor(interaction(Tax, Location)))
+
+ctmin_means <- ctmin %>%
+  group_by(Location, Tax) %>%
+  summarize(meantol = mean(Ctmin), sdtol = sd(Ctmin), setol = sdtol/sqrt(n()))
 
 table(ctmin$taxloc)
 
@@ -682,7 +716,7 @@ ctplots <- gbm::grid.arrange( mylegend, gridExtra::arrangeGrob(ctmin.pred.plot +
                          nrow=1),
             nrow=2, heights=c(1, 12))
 
-ggsave("Plots/Fig3_MS.png", plot = ctplots, width = 8, height = 7)
+ggsave("Plots/Fig3_MS.pdf", plot = ctplots, width = 8, height = 7)
 ```
 
 ```{r}
@@ -2115,8 +2149,7 @@ my.sites <- comms %>%
 layers <- list_layers(marine = TRUE)
 environment.bottom <- load_layers(c("MS_biogeo15_sst_max_5m",
                                     "MS_biogeo14_sst_min_5m",
-                                    "MS_biogeo16_sst_range_5m",
-                                    "BO_sstmean"),
+                                    "MS_biogeo16_sst_range_5m"),
                                   equalarea=FALSE, rasterstack=TRUE)
 
 environment.vars <- data.frame(Name=my.sites$Name, extract(environment.bottom, my.sites[,4:5]))
@@ -2165,9 +2198,9 @@ maxplot <- ggplot(data = mapdata.max, aes(x = x, y = y)) +
   scale_x_continuous(limits = c(50, 60), breaks = seq(50, 60, 2.5), expand = c(0,0)) +
   xlab("Longitude") +
   ylab("Latitude") +
-  annotate("text", x = 53.5, y = 26, size = 4, label = "ARABIAN GULF", color = "black", fontface = 2) +
-  annotate("text", x = 58.5, y = 24.5, size = 4, label = "GULF OF OMAN", color = "black", fontface = 2) +
-  annotate("text", x = 52, y = 30, size = 4, label = "a) Maximum", color = "black", fontface = 2) +
+  annotate("text", x = 53.5, y = 26, size = 2, label = "ARABIAN GULF", color = "black", fontface = 2) +
+  annotate("text", x = 58.5, y = 24.5, size = 2, label = "GULF OF OMAN", color = "black", fontface = 2) +
+  annotate("text", x = 52, y = 30, size = 2, label = "a) Maximum", color = "black", fontface = 2) +
   coord_cartesian(clip="off")
 maxplot
 
@@ -2190,9 +2223,9 @@ minplot <- ggplot(data = mapdata.min, aes(x = x, y = y)) +
   scale_x_continuous(limits = c(50, 60), breaks = seq(50, 60, 2.5), expand = c(0,0)) +
   xlab("Longitude") +
   ylab("Latitude") +
-  annotate("text", x = 53.5, y = 26, size = 4, label = "ARABIAN GULF", color = "black", fontface = 2) +
-  annotate("text", x = 58.5, y = 24.5, size = 4, label = "GULF OF OMAN", color = "black", fontface = 2) +
-  annotate("text", x = 52, y = 30, size = 4, label = "b) Minimum", color = "black", fontface = 2) +
+  annotate("text", x = 53.5, y = 26, size = 2, label = "ARABIAN GULF", color = "black", fontface = 2) +
+  annotate("text", x = 58.5, y = 24.5, size = 2, label = "GULF OF OMAN", color = "black", fontface = 2) +
+  annotate("text", x = 52, y = 30, size = 2, label = "b) Minimum", color = "black", fontface = 2) +
   coord_cartesian(clip="off")
 minplot
 
@@ -2215,15 +2248,15 @@ rangeplot <- ggplot(data = mapdata.range, aes(x = x, y = y)) +
   scale_x_continuous(limits = c(50, 60), breaks = seq(50, 60, 2.5), expand = c(0,0)) +
   xlab("Longitude") +
   ylab("Latitude") +
-  annotate("text", x = 53.5, y = 26, size = 4, label = "ARABIAN GULF", color = "black", fontface = 2) +
-  annotate("text", x = 58.5, y = 24.5, size = 4, label = "GULF OF OMAN", color = "black", fontface = 2) +
-  annotate("text", x = 52, y = 30, size = 4, label = "c) Range", color = "black", fontface = 2) +
+  annotate("text", x = 53.5, y = 26, size = 2, label = "ARABIAN GULF", color = "black", fontface = 2) +
+  annotate("text", x = 58.5, y = 24.5, size = 2, label = "GULF OF OMAN", color = "black", fontface = 2) +
+  annotate("text", x = 52, y = 30, size = 2, label = "c) Range", color = "black", fontface = 2) +
   coord_cartesian(clip="off")
 rangeplot
 
 temp_plots <- ggarrange(maxplot, minplot, rangeplot, ncol = 3, nrow = 1)
 temp_plots
-ggsave("Plots/temperature_plots.pdf", temp_plots, width = 14, height = 6, useDingbats = F)
+ggsave("Plots/temperature_plots.png", temp_plots, width = 8, height = 3)
 
 # 
 # growth.species <- read.csv("Data/Morais_DS1.csv")
@@ -2281,7 +2314,7 @@ ggsave("Plots/temperature_plots.pdf", temp_plots, width = 14, height = 6, useDin
 #   arrange(Var1, Var2)
 ```
 
-``` {r BENTHIC COMPOSITION}
+```{r BENTHIC: COMPOSITION}
 table(benthcomm$category)
 
 benth.tidy <- benthcomm %>%
@@ -2312,6 +2345,8 @@ benth.cc <- benth.tidy %>%
 benth.mds <- metaMDS(benth.tidy[-c(1:4)], metric = "manhattan", trymax = 1000)
 benth.mds
 stressplot(benth.mds)
+
+perm.benth = adonis(benth.tidy[-c(1:4)] ~ location, benth.tidy, distance = "manhattan", permutations = 999)
 
 ###get values and plot in ggplot
 site.scores.benth <- as.tibble(scores(benth.mds)) %>%
@@ -2387,8 +2422,8 @@ comp.plot.benth
 
 
 #run GLM with abundance data and offset for surface area sampled
-cc.model <- brm(logit_scaled(benth.cc) ~ location + (1|site), 
-                            data = benth.cc.mod, control = list(adapt_delta = 0.999, max_treedepth = 15))
+cc.model <- brm(logit_scaled(total_cc) ~ location + (1|site), 
+                            data = benth.cc, control = list(adapt_delta = 0.999, max_treedepth = 15))
 summary(cc.model)
 
 ggsave("Plots/BenthicPlot.pdf", plot = comp_plot, width = 6, height = 4, useDingbats = FALSE)
