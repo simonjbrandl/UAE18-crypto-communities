@@ -11,11 +11,7 @@ options (stringsAsFactors = F, strip.white = T, header = T)
 ## Setting file paths and loading package ##
 #------------------------------------------#
 
-pkgpath <- gsub ('Fish Growth UAE', 
-			 	 'Documents/SJB1/Projects/UAE18 crypto communities/rfishprod', getwd ())
-		## Package location in my computer
-
-devtools::load_all(pkgpath)
+devtools::load_all('Documents/SJB1/Projects/UAE18 crypto communities/rfishprod')
 
 
 ###########################################
@@ -27,10 +23,10 @@ devtools::load_all(pkgpath)
 #----------------#
 
 ## Initial traits ##
-predata <- read.csv ('traitlist_allfish.csv')
+predata <- read.csv ('Documents/SJB1/Projects/UAE18 crypto communities/GrowthArabianCryptos/traitlist_allfish.csv')
 	## Individual level dataset sent by Simon
 	
-lenwei <- read.csv ('famlevparamsSJB.csv')
+lenwei <- read.csv ('Documents/SJB1/Projects/UAE18 crypto communities/GrowthArabianCryptos/famlevparamsSJB.csv')
 	## Merging with length-weight regression parameters at the family level, needs refining 
 
 

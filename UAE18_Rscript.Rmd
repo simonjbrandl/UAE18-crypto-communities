@@ -17,11 +17,8 @@ library(plyr)
 library(dplyr)
 library(tidyverse)
 library(vegan)
-library(nlme)
-library(lme4)
 library(ggpubr)
 library(ggrepel)
-library(colorRamps)
 library(tidybayes)
 library(brms)
 library(fishualize)
@@ -128,6 +125,10 @@ comm_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summa
                                      Site == "Snoopy" ~ 0.70),
          site_reord = factor(Site, levels = sort(levels(site_intercepts))))
 
+###
+comm_summary <- comm_means %>%
+  group_by(Location) %>%
+  summarize(mdens = mean(Abundance), mric = mean(Speciesrichness))
 
 #run GLM with abundance data and offset for surface area sampled
 abundance.model <- brm(log(Density) ~ Location + (1|Site), 
@@ -155,7 +156,7 @@ abu.pred.plot <- ggplot(data = abu.pred) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = alpha(uaecols, 0.5)) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-  scale_x_log10(limits = c(0.1,1e3), breaks=c(0,0.1,1,10,100,1000), labels=c(0,0.1,1,10,100,1000)) +
+  scale_x_log10(expand = c(0,0), limits = c(0.1,1e3), breaks=c(0,0.1,1,10,100,1000), labels=c(0,0.1,1,10,100,1000)) +
     annotation_logticks(base = 10, sides = "b",
                           short = unit(1,"mm"),
                         mid = unit(1,"mm"),
@@ -169,7 +170,7 @@ abu.pred.plot <- ggplot(data = abu.pred) +
   guides(fill = guide_legend(nrow = 1),
          shape = guide_legend(nrow = 1)) +
   xlab(expression(paste("Density of cryptobenthic fishes (individuals ", m^{-2},")")))+
-  annotate("text", x = 0.1, y = 2.7, size = 3, label = "(b)", color = "black")
+  annotate("text", x = 0.15, y = 2.7, size = 3, label = "(b)", color = "black")
 abu.pred.plot
 
 ggsave("Plots/abupred.pdf", abu.pred.plot, width = 8, height = 4, useDingbats = F)
@@ -203,7 +204,7 @@ bio.pred.plot <- ggplot(data = bio.pred) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = alpha(uaecols, 0.5)) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-  scale_x_log10(limits = c(0.1,1000), breaks=c(0.1,1,10,100,1000), labels=c(0.1,1,10,100,1000)) +
+  scale_x_log10(expand = c(0, 0), limits = c(0.1,1000), breaks=c(0.1,1,10,100,1000), labels=c(0.1,1,10,100,1000)) +
     annotation_logticks(base = 10, sides = "b",
                           short = unit(1,"mm"),
                         mid = unit(1,"mm"),
@@ -217,7 +218,7 @@ bio.pred.plot <- ggplot(data = bio.pred) +
   guides(fill = guide_legend(nrow = 1),
          shape = guide_legend(nrow = 1)) +
   xlab(expression(paste("Biomass of cryptobenthic fishes (grams ", m^{-2},")")))+
-  annotate("text", x = 0.1, y = 2.7, size = 3, label = "(c)", color = "black")
+  annotate("text", x = 0.15, y = 2.7, size = 3, label = "(c)", color = "black")
 
 bio.pred.plot
 
@@ -252,7 +253,7 @@ div.pred.plot <- ggplot(data = div.pred) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = alpha(uaecols, 0.5)) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-  scale_x_log10(limits = c(0.1,100), breaks=c(0.1,1,10,100), labels=c(0.1,1,10,100)) +
+  scale_x_log10(expand = c(0,0), limits = c(0.1,100), breaks=c(0.1,1,10,100), labels=c(0.1,1,10,100)) +
   theme_sjb() +
     annotation_logticks(base = 10, sides = "b",
                           short = unit(1,"mm"),
@@ -267,7 +268,7 @@ div.pred.plot <- ggplot(data = div.pred) +
   guides(fill = guide_legend(ncol = 1),
          shape = guide_legend(ncol = 1)) +
   xlab(expression(paste("Species richness of cryptobenthic fishes (species ", m^{-2},")"))) +
-  annotate("text", x = 0.1, y = 2.7, size = 3, label = "(a)", color = "black")
+  annotate("text", x = 0.15, y = 2.7, size = 3, label = "(a)", color = "black")
 
        
 div.pred.plot
@@ -289,7 +290,7 @@ Fig1 <- gbm::grid.arrange(gridExtra::arrangeGrob(div.pred.plot + theme(legend.po
                          nrow=3), mylegend, 
             ncol=2, widths=c(6,1))
 
-ggsave("Plots/Fig1_MS.png", Fig1, width = 6, height = 8)
+ggsave("Plots/Fig1_MS.pdf", Fig1, width = 6, height = 8, useDingbats = F)
 ```
 
 ```{r COMMUNITY COMPOSITION NMDS}
@@ -375,22 +376,25 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
   geom_point(aes(color = Location, group = Location, fill = Location,
                              shape = reorder(Site, sort(as.numeric(site_intercepts))))) +
     geom_segment(data = genspeabu, aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
-               arrow = arrow(length = unit(0.3, "cm")), color = "grey69",
+               arrow = arrow(length = unit(0.2, "cm")), color = "black", lwd = 0.25,
                inherit.aes = F) +
   geom_text_repel(data = genspeabu, aes(x=NMDS1, NMDS2, label=Genspe), size=3, inherit.aes = F) +
-  theme_sjb()+
-  theme(legend.position = "none",
-        legend.title.align = 0) +
+  theme_bw()+
+  theme(legend.position = "top",
+        legend.title.align = 0,
+        legend.box = "horizontal") +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = uaecols) +
   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-    guides(fill = guide_legend(ncol = 1),
-         shape = guide_legend(ncol = 1)) +
-  scale_y_continuous(limits = c(-0.8, 0.8), breaks = seq(-0.8,0.8,0.4)) +
-  scale_x_continuous(limits = c(-1, 1), breaks = seq(-1,1,0.5)) 
+    guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+    scale_y_continuous(limits = c(-0.75, 0.75), breaks = seq(-0.75, 0.75, 0.25)) +
+  scale_x_continuous(limits = c(-1.2, 1.2)) +
+  xlab("NMDS1") +
+  ylab("NMDS2")
 
 comp_plot
-ggsave("Plots/Fig2_MS.png", plot = comp_plot, width = 4, height = 5)
+ggsave("Plots/Fig2_MS.pdf", plot = comp_plot, width = 8, height = 8, useDingbats = TRUE)
 ```
 
 ```{r SIZE: E. ventermaculis and C. anomalus}
@@ -498,8 +502,8 @@ abu.event <- comms %>%
          site_reord = factor(Site, levels = sort(levels(site_intercepts))))
 
 #run GLM with abundance data and offset for surface area sampled
-event.abu.model <- brm(log(Density) ~ Location + (1|Site), 
-                            data = abu.event, control = list(adapt_delta = 0.999, max_treedepth = 15))
+event.abu.model <- brm(Abundance ~ Location + (1|Site), 
+                            data = abu.event, family = negbinomial, control = list(adapt_delta = 0.999, max_treedepth = 15))
 summary(event.abu.model)
 event.abu.pred <- abu.event %>%
   data_grid(Location) %>%
@@ -556,7 +560,7 @@ abu.epulc <- comms %>%
 
 #run GLM with abundance data and offset for surface area sampled
 epulc.abu.model <- brm(Abundance ~ Location + (1|Site), 
-                            data = abu.epulc,family = po control = list(adapt_delta = 0.999, max_treedepth = 15))
+                            data = abu.epulc,family = negbinomial, control = list(adapt_delta = 0.999, max_treedepth = 15))
 summary(epulc.abu.model)
 epulc.abu.pred <- abu.event %>%
   data_grid(Location) %>%
@@ -592,6 +596,31 @@ event.abu.pred.plot
 
 
 
+helper <- abu.event %>%
+  select(Location, Site, Sitename)
+
+
+abu.canom <- comms %>%
+  filter(Tax %in% c("CORYANOM"))%>%
+  group_by(Location, Site, Sitename) %>%
+  summarize(Abundance = n(), SA = mean(SA)) %>%
+  mutate(Density = Abundance/SA,
+         site_intercepts = case_when(Site == "Dhabiya" ~ 1.90,
+                                     Site == "RasGhanada" ~ 1.80,
+                                     Site == "Saadiyat" ~ 1.70,
+                                     Site == "Dibba" ~ 0.9,
+                                     Site == "SharmRock" ~ 0.80,
+                                     Site == "Snoopy" ~ 0.70),
+         site_reord = factor(Site, levels = sort(levels(site_intercepts))))%>%
+  right_join(helper) %>%
+  replace_na(list(Abundance = 0, SA = 0, Density = 0))
+
+
+#run GLM with abundance data and offset for surface area sampled
+canom.abu.model <- brm(Abundance ~ Location + SA + (1|Site), 
+                            data = abu.canom,family = negbinomial, control = list(adapt_delta = 0.999, max_treedepth = 15))
+
+summary(canom.abu.model)
 
 abu.canom <- comms %>%
   filter(Tax == "CORYANOM")
@@ -623,11 +652,11 @@ ctmax <- ctmax %>%
 
 sum(table(ctmax$taxloc))
 
-maxmod <- brm(Ctmax ~ taxloc, data = ctmax,  control = list(adapt_delta = 0.995, max_treedepth = 18), iter = 5000);beep(sound = "coin")
+maxmod <- brm(Ctmax ~ taxloc, data = ctmax,  control = list(adapt_delta = 0.995, max_treedepth = 18));beep(sound = "coin")
 summary(maxmod)
-
+plot(maxmod)
 ctmax.pred <- ctmax %>%
-  data_grid(taxloc)%>%  
+  data_grid(taxloc) %>%  
   add_predicted_draws(maxmod, n = 10000) %>%
   separate(taxloc, c("Tax", "Location"), remove = F) %>%
   mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
@@ -637,6 +666,10 @@ ctmax.pred <- ctmax %>%
                               Tax == "EVIOGUTT" ~ 2,
                               TRUE ~ 1))
 
+library(emmeans)
+warp_em <- emmeans (maxmod,  ~ taxloc)
+cont <- contrast(warp_em, "tukey")
+cont
 ctmax_means <- ctmax %>%
   group_by(Location, Tax) %>%
   summarize(meantol = mean(Ctmax), sdtol = sd(Ctmax), setol = sdtol/sqrt(n()))
@@ -693,6 +726,8 @@ ctmin <- ctmin %>%
                               TRUE ~ 1),
            taxloc = factor(interaction(Tax, Location)))
 
+
+
 ctmin_means <- ctmin %>%
   group_by(Location, Tax) %>%
   summarize(meantol = mean(Ctmin), sdtol = sd(Ctmin), setol = sdtol/sqrt(n()))
@@ -701,6 +736,10 @@ sum(table(ctmin$taxloc))
 
 minmod <- brm(Ctmin ~ taxloc, data = ctmin,  control = list(adapt_delta = 0.995, max_treedepth = 18), iter = 5000);beep(sound = "coin")
 summary(minmod)
+
+warp_em_min <- emmeans (minmod,  ~ taxloc)
+cont <- contrast(warp_em_min, "tukey")
+cont
 
 ctmin.pred <- ctmin %>%
   data_grid(taxloc)%>%  
@@ -1584,7 +1623,21 @@ mod.perm.comp.coi
 groupings <- mod.perm.comp.coi %>%
   pivot_longer(cols = c(3:8), names_to = "cluster", values_to = "group") %>%
   separate(cluster, c("Location", "Species"), remove = F) %>%
-  mutate(iteration = rep(1:99, 6))
+  mutate(iteration = rep(1:99, each = 6)) +
+  group_by
+
+group.plot <- ggplot(groupings, aes(x = iteration, y = group, color = Location, shape =  Species)) +
+  geom_jitter(width = 0, height = 0.2) +
+    theme_sjb() +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = "top",
+        legend.box = "vertical") +
+  scale_color_manual(values = uaecols)
+group.plot
+
+ggsave("Plots/FigSupp1Groups.pdf", group.plot, width = 6, height = 6, useDingbats = F)
 
 share.color <- network.coi %>%
   select(ID, Location) %>%
@@ -2507,7 +2560,7 @@ point.plot.benth <- ggplot(mds.points.benth) +
                arrow = arrow(length = unit(0.3, "cm")), color = "grey69",
                inherit.aes = F) +
   theme(legend.position = "top") +
-  geom_text_repel(aes(x=NMDS1, NMDS2, label=category), size=4, inherit.aes = F) +
+  geom_text_repel(aes(x=NMDS1, NMDS2, label=category), size=3, inherit.aes = F) +
   scale_y_continuous(limits = c(-0.75, 0.75), breaks = seq(-0.75, 0.75, 0.25)) +
   scale_x_continuous(limits = c(-1.2, 1.2)) +
   xlab("NMDS1") +
@@ -2535,7 +2588,7 @@ comp.plot.benth <- ggplot(site.scores.benth, aes(x = NMDS1, y = NMDS2)) +
                                          group = location),
                alpha = 0.4, lty = 1, lwd = 0.1, color = "black") +
     geom_segment(data = mds.points.benth, aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
-               arrow = arrow(length = unit(0.3, "cm")), color = "grey69",
+               arrow = arrow(length = unit(0.2, "cm")), color = "black", lwd = 0.25,
                inherit.aes = F) +
   theme(legend.position = "top") +
   geom_text_repel(data = mds.points.benth, aes(x=NMDS1, NMDS2, label=category), size=4, inherit.aes = F) +
@@ -2561,6 +2614,6 @@ cc.model <- brm(logit_scaled(total_cc) ~ location + (1|site),
                             data = benth.cc, control = list(adapt_delta = 0.999, max_treedepth = 15))
 summary(cc.model)
 
-ggsave("Plots/BenthicPlot.pdf", plot = comp_plot, width = 6, height = 4, useDingbats = FALSE)
+ggsave("Plots/BenthicPlot.pdf", plot = comp.plot.benth, width = 8, height = 8, useDingbats = FALSE)
 
 ```
