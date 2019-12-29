@@ -33,6 +33,7 @@ library(GGally)
 library(extrafont)
 library(xgboost)
 library(igraph)
+library(bipartite)
 devtools::load_all("rfishprod")
 ```
 
@@ -98,6 +99,12 @@ theme_sjb <- function (base_size = 8, base_family = "") {
 comms$radius <- (2*comms$Dimension)/(2*pi)
 # surface area (4*pi*radius^2)/2 and divide by 10000 for square meters
 comms$SA <- ((4*pi*comms$radius^2)/2)/10000
+
+taxlists <- comms %>%
+  group_by(Family, Genus, Species, Location) %>%
+  summarize(value = n())%>%
+  pivot_wider(names_from = Location, values_from = value, values_fill = list(value = 0))
+write.csv(taxlists, file = "Data/TaxaListLocation.csv")
 
 ###some metadata for paper
 loccoord <- comms %>%
@@ -1075,13 +1082,13 @@ ggsave("Plots/mds.pa.coi.loc.pdf", mds.coi.loc.vec, width = 7, height = 10, useD
 ### bring in other taxa
 coi.sub.taxloc <- coi.sub
 
-# coi.rra <- coi.sub.tax %>%
-#   select(-c(Location, Tax)) %>%
-#   gather(variable, value, -ID.match) %>%
-#   group_by(ID.match) %>% 
-#   mutate(percentage = value/sum(value)) %>% 
-#   select(-value) %>% 
-#   spread(variable, percentage)
+coi.rra <- coi.sub.taxloc %>%
+   select(-c(Location, Tax)) %>%
+   gather(variable, value, -ID.match) %>%
+   group_by(ID.match) %>% 
+   mutate(percentage = value/sum(value)) %>% 
+   select(-value) %>% 
+   spread(variable, percentage)
 
 
 
@@ -1535,14 +1542,13 @@ ggsave("plots23svectors.pdf", plots23s, width = 12, height = 12, useDingbats = F
 #######################
 #######################
 #######################network
-meta.coi <- coi.sub.taxloc[c(1:3)] %>%
-    filter(Tax %in% c("ECSEPULC", "ENNEVENT", "CORYANOM"))
+meta.coi <- coi.sub.taxloc[c(1:3)]
 network.coi <- coi.pa %>%
   select(-rowsum) %>%
   pivot_longer(cols = 2:547, names_to = "ID") %>%
   filter(value > 0) %>%
   left_join(meta.coi[1:3], by = "ID.match") %>%
-  group_by(ID, Location, Tax) %>%
+  group_by(ID, Tax, Location) %>%
   summarize(value = sum(value)) %>%
   mutate(LocTax = interaction(Location, Tax)) %>%
   select(ID, LocTax, everything())
@@ -1640,6 +1646,7 @@ group.plot
 ggsave("Plots/FigSupp1Groups.pdf", group.plot, width = 6, height = 6, useDingbats = F)
 
 share.color <- network.coi %>%
+  ungroup() %>%
   select(ID, Location) %>%
   distinct() 
 
@@ -1719,66 +1726,6 @@ network.23s <- pa23s.loc %>%
   summarize(value = sum(value)) %>%
   mutate(LocTax = interaction(Location, Tax)) %>%
   select(ID, LocTax, everything())
-
-
-cfstat23s <- graph_from_data_frame(network.23s)
-
-###get network community characteristics
-ed23s <- edge_density(cfstat23s, loops=F)
-
-net.sym23s <- as.undirected(cfstat23s, mode= "collapse", edge.attr.comb=list(weight="sum", "ignore"))
-
-ceb23s <- cluster_edge_betweenness(net.sym23s) 
-memb23s <- membership(ceb23s)
-mod23s <- modularity(ceb23s)
-memb23s[2257:2262]
-###permutations
-
-mod.perm.23s <- data.frame(ed_perm = numeric(length = 99), mod_perm = numeric(length = 99))
-
-for (i in 1:99) {
-  print(i)
-
-  
-meta.23s.random <- meta.coi %>%
-  select(Tax, Location) %>%
-  sample_frac(1L) %>%
-  add_column(ID.match = meta.coi$ID.match) %>%
-  select(ID.match, Location, Tax)
-
-network.23s.rand <- pa23s.loc %>%
-  select(-rowsum) %>%
-  pivot_longer(cols = 2:3007, names_to = "ID") %>%
-  filter(value > 0) %>%
-  right_join(meta.23s.random[1:3], by = "ID.match") %>%
-  group_by(ID, Location, Tax) %>%
-  summarize(value = sum(value))
-
-cfstat.23s.rand <- graph_from_data_frame(network.23s.rand)
-
-###get network community characteristics
-ed.23s.rand <- edge_density(cfstat.23s.rand, loops=F)
-
-net.sym.23s.rand <- as.undirected(cfstat.23s.rand, mode= "collapse", edge.attr.comb=list(weight="sum", "ignore"))
-
-ceb.23s.rand <- cluster_edge_betweenness(net.sym.23s.rand) 
-memb.23s.rand <- membership(ceb.23s.rand)
-mod.23s.rand <- modularity(ceb.23s.rand)
-
-mod.perm.23s[i,1] <- ed.23s.rand
-mod.perm.23s[i,2] <- mod.23s.rand
-}
-
-mod.perm.comp.23s <- mod.perm.23s %>%
-  mutate(ed_emp = ed23s,
-         mod_emp = mod23s,
-         ed_comp = case_when(ed_perm < ed_emp ~ 1,
-                             TRUE ~ 0),
-         mod_comp = case_when(mod_perm > mod_emp ~ 1,
-                              TRUE ~ 0))
-
-mod.perm.comp.23s
-
 
 
 share.color.23s <- network.23s %>%
@@ -1999,46 +1946,233 @@ ceb.23s.goo <- cluster_edge_betweenness(net.sym.23s.goo)
 memb.23s.goo <- membership(ceb.23s.goo)
 modul.23s.goo <- modularity(ceb.23s.goo)
 memb.23s.goo[1925:1930]
+
+
+
+
+###########################
+####### GoO only ##########
+meta.coi.all <- coi.sub.taxloc[c(1:3)]
+network.coi.all <- coi.pa.taxloc %>%
+  select(-rowsum) %>%
+  pivot_longer(cols = 2:547, names_to = "ID") %>%
+  filter(value > 0) %>%
+  left_join(meta.coi.all[1:3], by = "ID.match") %>%
+  group_by(ID) %>%
+  mutate(total = sum(value)) %>%
+  ungroup() 
+
+
+network.coi.plot <- coi.pa.taxloc %>%
+  select(-rowsum) %>%
+  pivot_longer(cols = 2:547, names_to = "ID") %>%
+  filter(value > 0) %>%
+  left_join(meta.coi.all[1:3], by = "ID.match") %>%
+  group_by(ID) %>%
+  mutate(total = sum(value)) %>%
+  ungroup() %>%
+  arrange(ID)
+
+
+share.color <- network.coi.plot %>%
+  ungroup() %>%
+  select(ID, Location) %>%
+  distinct() 
+
+shared <- share.color %>%
+  mutate(indicator = 1) %>%
+  group_by(ID) %>%
+  summarize(shared = sum(indicator)) %>%
+  mutate(sharedornot = case_when(shared == 1 ~ "unique",
+                                 TRUE ~ "Shared")) %>%
+  right_join(share.color) %>%
+  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
+                                 TRUE ~ paste(sharedornot)))
+  
+network.coi.plot.comb <- network.coi.plot %>%
+  left_join(shared, by = "ID") %>%
+  mutate(taxloc = interaction(Tax, Location.y))
+
+uaecols.network <- c(uaecols, "grey69")
+
+network.plot.coi <- ggplot(data = network.coi.plot.comb) +
+  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = taxloc, colour = share.color, shape = Tax),
+  lwd=3, labelon = F, ealpha = 0.2, arrowsize = 0.1, linewidth = 0.2, 
+  vjust = 0.5, hjust = 0.5) +
+  # labelcolour = cfnet2$lcolour) +
+  theme_net() +
+  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
+  scale_color_manual(values = uaecols.network) +
+  theme(legend.position = "right")
+network.plot.coi
+
+ggsave("Plots/nwtcoi_both.pdf", plot = network.plot.coi, width = 8, height = 8, useDingbats=FALSE)
+
+#######
+########
+# run modularity
+network.coi.bip <- network.coi.all %>%
+  pivot_wider(id_cols = ID.match, names_from = ID, values_from = value, values_fill = list(value = 0))
+
+mod.coi.single <- computeModules(network.coi.bip[-1], method = "Beckett", forceLPA = FALSE)
+
+mod.coi <- metaComputeModules(network.coi.bip[-1], method = "Beckett", N = 20, forceLPA = FALSE)
+
+pred.modularity <- as.data.frame(mod.coi@modules[-1, -c(1,2) ]) %>%
+  select(1:78) %>%
+  rename_at(vars(colnames(.)), ~ network.coi.bip$ID.match) %>%
+  mutate(module = 1:5) %>%
+  pivot_longer(cols = 1:78, names_to = "ID.match", values_to = "value") %>%
+  filter(value > 0) %>%
+  left_join(meta.coi.all) %>%
+  select(-value) %>%
+  unite("taxloc", Tax:Location, sep = ".", remove = F) %>%
+  arrange(taxloc) %>%
+  unite(taxloc, ID.match, col = "xval", remove = F)
+
+write.csv(pred.modularity, file = "Data/COImembership_20iter.csv")
+
+helper <- pred.modularity %>%
+  arrange(ID.match, taxloc)
+###visualize clusters
+moduleplot.coi <- ggplot(pred.modularity, aes(x = xval, y = as.factor(module), fill = Location, color = Location)) +
+  geom_tile(color = "black", position = "identity", height = 0.75, width = 1) +
+  scale_fill_manual(values = uaecols) +
+  scale_color_manual(values = uaecols) +
+  theme_bw() +
+  scale_x_discrete(position = "top") +
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = "top",
+        legend.box = "horizontal",
+        axis.title.x=element_blank()) +
+  coord_fixed(ratio = 3)
+moduleplot.coi
+
+ggsave("Plots/modulplot_coi.pdf", plot = moduleplot.coi, width = 8, height = 6, useDingbats=FALSE)
+
+###23s
+meta.23s.all <- sub23s.taxloc[c(1:3)]
+network.23s.all <- pa23s.taxloc %>%
+  select(-rowsum) %>%
+  pivot_longer(cols = 2:3007, names_to = "ID") %>%
+  filter(value > 0) %>%
+  left_join(meta.23s.all[1:3], by = "ID.match") %>%
+  group_by(ID, ID.match, Location, Tax) %>%
+  summarize(value = sum(value)) %>%
+  group_by(ID) %>%
+  mutate(total = sum(value)) %>%
+  ungroup() %>%
+  filter(total  > 1) %>%
+  arrange(ID)
+
+length(unique(network.23s.all$ID))
+
+network.23s.plot <- pa23s.taxloc %>%
+  select(-rowsum) %>%
+  pivot_longer(cols = 2:3007, names_to = "ID") %>%
+  filter(value > 0) %>%
+  left_join(meta.23s.all[1:3], by = "ID.match") %>%
+  group_by(ID, Location, Tax) %>%
+  summarize(value = sum(value)) %>%
+  mutate(LocTax = interaction(Location, Tax)) %>%
+  select(ID, LocTax, everything())
+
+
+share.color.23s <- network.23s.plot %>%
+  select(ID, Location) %>%
+  distinct() 
+
+shared.23s <- share.color.23s %>%
+  mutate(indicator = 1) %>%
+  group_by(ID) %>%
+  summarize(shared = sum(indicator)) %>%
+  mutate(sharedornot = case_when(shared == 1 ~ "unique",
+                                 TRUE ~ "Shared")) %>%
+  right_join(share.color.23s) %>%
+  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
+                                 TRUE ~ paste(sharedornot)))
+  
+network.23s.colored <- network.23s.plot %>%
+  left_join(shared.23s, by = "ID") %>%
+  mutate(taxloc = interaction(Tax, Location.y))
+
+uaecols.network <- c(uaecols, "grey46")
+
+network.plot.23s <- ggplot(data = network.23s.colored) +
+ geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = taxloc, colour = share.color, shape = Tax, alpha = 0.75),
+  lwd=3, labelon = F, ealpha = 0.1, arrowsize = 0.1, linewidth = 0.2, 
+  vjust = 0.5, hjust = 0.5) +
+  # labelcolour = cfnet2$lcolour) +
+  theme_net() +
+  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
+  scale_color_manual(values = uaecols.network) +
+  theme(legend.position = "right")
+network.plot.23s
+
+ggsave("Plots/nwt23s_both.pdf", plot = network.plot.23s, width = 8, height = 8, useDingbats=FALSE)
+
+
+network.23s.bip <- network.23s.all %>%
+  pivot_wider(id_cols = ID.match, names_from = ID, values_from = value, values_fill = list(value = 0))
+
+mod.23s.single <- computeModules(network.23s.bip[-1], method = "Beckett", forceLPA = FALSE)
+
+mod.23s <- metaComputeModules(network.23s.bip[-1], method = "Beckett", N = 20, forceLPA = FALSE)
+
+pred.modularity.23s <- as.data.frame(mod.23s@modules[-1, -c(1,2) ]) %>%
+  select(1:86) %>%
+  rename_at(vars(colnames(.)), ~ network.23s.bip$ID.match)%>%
+  mutate(module = 1:5) %>%
+  pivot_longer(cols = 1:86, names_to = "ID.match", values_to = "value") %>%
+  filter(value > 0) %>%
+  left_join(meta.23s.all) %>%
+  select(-value) %>%
+  unite("taxloc", Tax:Location, sep = ".", remove = F) %>%
+  arrange(taxloc) %>%
+  unite(taxloc, ID.match, col = "xval", remove = F)
+
+write.csv(pred.modularity.23s, file = "Data/23smembership_20iter.csv")
+###visualize clusters
+moduleplot.23s <- ggplot(pred.modularity.23s, aes(x = xval, y = as.factor(module), fill = Location, color = Location)) +
+  geom_tile(color = "black", position = "identity", height = 0.75, width = 1) +
+  scale_fill_manual(values = uaecols) +
+  scale_color_manual(values = uaecols) +
+  theme_bw() +
+  scale_x_discrete(position = "top") +
+  theme(axis.text.x = element_text(angle = 90),
+        legend.position = "top",
+        legend.box = "horizontal",
+        axis.title.x=element_blank()) +
+  coord_fixed(ratio = 3)
+moduleplot.23s
+
+ggsave("Plots/modulplot_23s.pdf", plot = moduleplot.23s, width = 8, height = 6, useDingbats=FALSE)
 ```
 
 ```{r OTU/ESV DIVESRITY: RAREFACTION}
-# #coi otus and sequences
-# preydiv.coi <- coi.sub %>%
-#   select(-rowsum) %>%
-#   pivot_longer(OTU_8:OTU_394, names_to = "OTUs") %>%
-#   mutate(presabs = case_when(value > 0 ~ 1,
-#                               TRUE ~ 0)) %>%
-#   arrange(-value)
-#   # group_by(ID.match, Location, Tax) %>%
-#   # summarize(nb.otu.coi = sum(presabs),
-#   #           nb.seq.coi = sum(value))
-# preydiv.coi
-# 
-# #23s esvs and sequences
-# preydiv.23s <-   sub23s %>%
-#   select(-rowsum) %>%
-#   pivot_longer(ESV_000034:ESV_036113, names_to = "ESVs") %>%
-#   mutate(presabs = case_when(value > 0 ~ 1,
-#                               TRUE ~ 0)) %>%
-#   group_by(ID.match, Location, Tax) %>%
-#   summarize(nb.esv.23s = sum(presabs),
-#             nb.seq.23s = sum(value))
-# preydiv.23s
-# 
-# preydiv.allprim <- inner_join(preydiv.coi, preydiv.23s, by = c("ID.match", "Location", "Tax")) %>%
-#   mutate(ratio_tax = nb.otu.coi/nb.esv.23s,
-#          ratio_seq = nb.seq.coi/nb.seq.23s,
-#          tax_unit_sum = nb.otu.coi + nb.esv.23s) %>%
-#   group_by(Location, Tax) %>%
-#   summarize(mean_nbotu = mean(nb.otu.coi),
-#             mean_nbesv = mean(nb.esv.23s),
-#             mean_nbtotal = mean(tax_unit_sum),
-#             mean_seq_coi = mean(nb.seq.coi),
-#             mean_seq_23s = mean(nb.seq.23s),
-#             mean_ratio_tax = mean(ratio_tax),
-#             mean_ratio_seq = mean(ratio_seq)) %>%
-#   arrange(Tax)
-# preydiv.allprim
+#coi otus and sequences
+preydiv.coi <- coi.sub %>%
+  select(-rowsum) %>%
+  pivot_longer(OTU_8:OTU_394, names_to = "OTUs") %>%
+  mutate(presabs = case_when(value > 0 ~ 1,
+                              TRUE ~ 0)) %>%
+  group_by(ID.match, Location, Tax) %>%
+  summarize(nb.otu.coi = sum(presabs),
+            nb.seq.coi = sum(value))
+preydiv.coi
+
+#23s esvs and sequences
+preydiv.23s <-   sub23s %>%
+  select(-rowsum) %>%
+  pivot_longer(ESV_000034:ESV_036113, names_to = "ESVs") %>%
+  mutate(presabs = case_when(value > 0 ~ 1,
+                              TRUE ~ 0)) %>%
+  group_by(ID.match, Location, Tax) %>%
+  summarize(nb.esv.23s = sum(presabs),
+            nb.seq.23s = sum(value))
+preydiv.23s
+
+
 
 
 # 
@@ -2171,23 +2305,25 @@ coi.meta <- coi.seqs %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
   pivot_wider(names_from = "ID", values_from = "value") %>%
   rename(ID.match = name) %>%
-  left_join(preydiv.coi.nobac, by = "ID.match") %>%
+  left_join(preydiv.coi, by = "ID.match") %>%
   unite(Location, Tax, col = "ID", remove = F) %>%
   select(-nb.otu.coi, -nb.seq.coi) %>%
-  select(ID, Location, Tax) 
+  select(ID, Location, Tax) %>%
+  filter(ID != "NA_NA")
 
 coi.rare <- coi.seqs %>%
   select(ID, UAE18005.1:UAE18867.1) %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
   pivot_wider(names_from = "ID", values_from = "value") %>%
   rename(ID.match = name) %>%
-  left_join(preydiv.coi.nobac, by = "ID.match") %>%
+  left_join(preydiv.coi, by = "ID.match") %>%
   unite(Location, Tax, col = "ID", remove = T)%>%
   select(-ID.match, -nb.otu.coi, -nb.seq.coi) %>%
   group_by(ID) %>%
   summarize_all(funs(sum(.))) %>%
   pivot_longer(cols = 2:547) %>%
-  pivot_wider(names_from = "ID", values_from = "value")
+  pivot_wider(names_from = "ID", values_from = "value") %>%
+  select(-NA_NA)
 
 
 coi.rare1 <- as.data.frame(coi.rare)
@@ -2213,7 +2349,13 @@ rarefactioncoi
 rare <- fortify(rarefactioncoi, type=1) %>%
   rename(ID = site)
 rare.meta <- rare %>%
-  inner_join(coi.meta)
+  inner_join(coi.meta) %>%
+  mutate(taxonlong = case_when(Tax == "ANTEADEN" ~ "Antennablennius adenensis",
+                               Tax == "CORYANOM" ~ "Coryogalops anomolus",
+                               Tax == "ECSEPULC" ~ "Ecsenius pulcher",
+                               Tax == "ENNEVENT" ~ "Enneapterygius ventermaculus",
+                               Tax == "EVIOGUTT" ~ "Eviota guttata",
+                               Tax == "HETEVULG" ~ "Hetereleotris vulgaris"))
 head(rare.meta)
 
 rare.point <-rare.meta[which(rare.meta$method=="observed"),]
@@ -2227,10 +2369,12 @@ geom_line(aes(linetype=method), lwd=0.5, data=rare.line) + geom_ribbon(aes(ymin=
           axis.title = element_text(color = "black", size = 8, family = "Arial"),
           legend.title=element_text(size=8), 
           legend.text=element_text(size=8)) +
-  facet_wrap(.~Tax) +
+  facet_wrap(.~taxonlong) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = uaecols) +
-  ggtitle("(a)")
+  ggtitle("A") +
+  theme(strip.text = element_text(face = "italic"),
+        plot.title = element_text(size = 14, face = "bold"))
   
 rarefactionplot.coi
 
@@ -2241,7 +2385,7 @@ meta23s <- seqs23s %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
   pivot_wider(names_from = "ESV", values_from = "value") %>%
   rename(ID.match = name) %>%
-  left_join(preydiv.23s.nobac, by = "ID.match") %>%
+  left_join(preydiv.23s, by = "ID.match") %>%
   unite(Location, Tax, col = "ID", remove = F) %>%
   select(-nb.esv.23s, -nb.seq.23s) %>%
   select(ID, Location, Tax) 
@@ -2251,7 +2395,7 @@ rare23s <- seqs23s %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
   pivot_wider(names_from = "ESV", values_from = "value") %>%
   rename(ID.match = name) %>%
-  left_join(preydiv.23s.nobac, by = "ID.match") %>%
+  left_join(preydiv.23s, by = "ID.match") %>%
   unite(Location, Tax, col = "ID", remove = T)%>%
   select(-ID.match, -nb.esv.23s, -nb.seq.23s) %>%
   group_by(ID) %>%
@@ -2285,7 +2429,13 @@ rarefaction23s
 rarified23s <- fortify(rarefaction23s, type=1) %>%
   rename(ID = site)
 rare23smeta <- rarified23s %>%
-  inner_join(meta23s)
+  inner_join(meta23s) %>%
+    mutate(taxonlong = case_when(Tax == "ANTEADEN" ~ "Antennablennius adenensis",
+                               Tax == "CORYANOM" ~ "Coryogalops anomolus",
+                               Tax == "ECSEPULC" ~ "Ecsenius pulcher",
+                               Tax == "ENNEVENT" ~ "Enneapterygius ventermaculus",
+                               Tax == "EVIOGUTT" ~ "Eviota guttata",
+                               Tax == "HETEVULG" ~ "Hetereleotris vulgaris"))
 head(rare23smeta)
 
 rare23spoint <-rare23smeta[which(rare23smeta$method=="observed"),]
@@ -2300,24 +2450,26 @@ geom_line(aes(linetype=method), lwd=0.5, data=rare23sline) +
           axis.title = element_text(color = "black", size = 8, family = "Arial"),
           legend.title=element_text(size=8), 
           legend.text=element_text(size=8)) +
-  facet_wrap(.~Tax) +
+  facet_wrap(.~taxonlong) +
     scale_color_manual(values = uaecols) +
   scale_fill_manual(values = uaecols) +
-  ggtitle("(b)")
+  ggtitle("B") +
+    theme(strip.text = element_text(face = "italic"),
+        plot.title = element_text(size = 14, face = "bold"))
 rarefactionplot23s
 
 rarelegend<-g_legend(rarefactionplot23s)
 
-rarefactionplots <- gbm::grid.arrange(mylegend, gridExtra::arrangeGrob(rarefactionplot.coi + theme(legend.position="none"),
+rarefactionplots <- gbm::grid.arrange(rarelegend, gridExtra::arrangeGrob(rarefactionplot.coi + theme(legend.position="none"),
                          rarefactionplot23s + theme(legend.position="none"),
                          nrow=2),
             nrow=2, heights=c(1, 12))
 
-Fig4 <- gridExtra::arrangeGrob(rarefactionplot.coi + theme(legend.position="none"),
+FigS1 <- gridExtra::arrangeGrob(rarefactionplot.coi + theme(legend.position="none"),
                                rarefactionplot23s + theme(legend.position="none"), 
                                nrow = 2)
 
-ggsave("Plots/Fig4_MS.png", plot = Fig4, width = 5, height = 6)
+ggsave("Plots/FigS1_MS.png", plot = FigS1, width = 8, height = 10)
 ```
 
 
