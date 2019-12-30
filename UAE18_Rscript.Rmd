@@ -2372,7 +2372,7 @@ geom_line(aes(linetype=method), lwd=0.5, data=rare.line) + geom_ribbon(aes(ymin=
   facet_wrap(.~taxonlong) +
   scale_color_manual(values = uaecols) +
   scale_fill_manual(values = uaecols) +
-  ggtitle("A") +
+  ggtitle("a") +
   theme(strip.text = element_text(face = "italic"),
         plot.title = element_text(size = 14, face = "bold"))
   
@@ -2453,7 +2453,7 @@ geom_line(aes(linetype=method), lwd=0.5, data=rare23sline) +
   facet_wrap(.~taxonlong) +
     scale_color_manual(values = uaecols) +
   scale_fill_manual(values = uaecols) +
-  ggtitle("B") +
+  ggtitle("b") +
     theme(strip.text = element_text(face = "italic"),
         plot.title = element_text(size = 14, face = "bold"))
 rarefactionplot23s
