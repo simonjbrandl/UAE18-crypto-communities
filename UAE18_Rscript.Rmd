@@ -664,7 +664,7 @@ summary(maxmod)
 plot(maxmod)
 ctmax.pred <- ctmax %>%
   data_grid(taxloc) %>%  
-  add_predicted_draws(maxmod, n = 10000) %>%
+  add_fitted_draws(maxmod, n = 10000) %>%
   separate(taxloc, c("Tax", "Location"), remove = F) %>%
   mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
                               Tax == "ECSEPULC" ~ 5,
@@ -682,7 +682,7 @@ ctmax_means <- ctmax %>%
   summarize(meantol = mean(Ctmax), sdtol = sd(Ctmax), setol = sdtol/sqrt(n()))
 
 ctmax.pred.plot <- ggplot(data = ctmax.pred) +
-  geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location), color = "black")+
+  geom_halfeyeh(aes(y = ordervar, x = .value, fill = Location, group = Location))+
   geom_jitter(aes(x = Ctmax, y = ordervar, shape = Tax, fill = Location),
              data = ctmax, size = 1.5, color = "black", shape = 23, height = 0.1, stroke = 0.1) +
   scale_color_manual(values = uaecols, labels = c("Arabian Gulf", "Gulf of Oman")) +
@@ -696,26 +696,7 @@ ctmax.pred.plot <- ggplot(data = ctmax.pred) +
   guides(fill = guide_legend(nrow = 1),
          shape = guide_legend(nrow = 1)) +
   xlab("Critical thermal maximum (º Celsius)") +
-  scale_x_continuous(limits = c(34,41), breaks = seq(34,41,1)) +
-  annotation_custom(canom, xmin=33.75, xmax=35.25, ymin=6, ymax=7) +
-  annotation_custom(epulc, xmin=33.75, xmax=35.25, ymin=5, ymax=6) +
-  annotation_custom(event, xmin=33.75, xmax=35.25, ymin=4, ymax=5) +
-  annotation_custom(hvulg, xmin=33.75, xmax=35.25, ymin=3, ymax=4) +
-  annotation_custom(egutt, xmin=33.75, xmax=35.25, ymin=2, ymax=3) +
-  annotation_custom(hfusc, xmin=33.75, xmax=35.25, ymin=1, ymax=2) +
-  annotate("text", x = 34.5, y = 6.15, 
-            label = 'italic("C. anomolus")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 34.5, y = 5.15, 
-            label = 'italic("E. pulcher")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 34.5, y = 4.15, 
-            label = 'italic("E. ventermaculus")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 34.5, y = 3.15, 
-            label = 'italic("H. vulgaris")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 34.5, y = 2.15, 
-            label = 'italic("E. guttata")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 34.5, y = 1.15, 
-            label = 'italic("H. fuscopinna")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 34, y = 7.1, size = 3, label = "(b)")
+  scale_x_continuous(limits = c(35,40), breaks = seq(35,40,1))
   
 ctmax.pred.plot
 
@@ -750,7 +731,7 @@ cont
 
 ctmin.pred <- ctmin %>%
   data_grid(taxloc)%>%  
-  add_predicted_draws(minmod, n = 10000) %>%
+  add_fitted_draws(minmod, n = 10000) %>%
   separate(taxloc, c("Tax", "Location"), remove = F) %>%
   mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
                               Tax == "ECSEPULC" ~ 5,
@@ -760,7 +741,7 @@ ctmin.pred <- ctmin %>%
                               TRUE ~ 1))
 
 ctmin.pred.plot <- ggplot(data = ctmin.pred) +
-  geom_halfeyeh(aes(y = ordervar, x = .prediction, fill = Location), color = "black")+
+  geom_halfeyeh(aes(y = ordervar, x = .value, fill = Location, group = Location))+
   geom_jitter(aes(x = Ctmin, y = ordervar, shape = Tax, fill = Location),
              data = ctmin, size = 1.5, color = "black", shape = 23, height = 0.1, stroke = 0.1) +
   scale_color_manual(values = uaecols, labels = c("Arabian Gulf", "Gulf of Oman")) +
@@ -773,26 +754,7 @@ ctmin.pred.plot <- ggplot(data = ctmin.pred) +
   guides(fill = guide_legend(nrow = 1),
          shape = guide_legend(nrow = 1)) +
   xlab("Critical thermal minimum (º Celsius)") +
-  scale_x_continuous(limits = c(9.5,16.5), breaks = seq(9,16.5,1)) +
-  annotation_custom(canom, xmin=15.25, xmax=16.75, ymin=6, ymax=7) +
-  annotation_custom(epulc, xmin=15.25, xmax=16.75, ymin=5, ymax=6) +
-  annotation_custom(event, xmin=15.25, xmax=16.75, ymin=4, ymax=5) +
-  annotation_custom(hvulg, xmin=15.25, xmax=16.75, ymin=3, ymax=4) +
-  annotation_custom(egutt, xmin=15.25, xmax=16.75, ymin=2, ymax=3) +
-  annotation_custom(hfusc, xmin=15.25, xmax=16.75, ymin=1, ymax=2) +
-  annotate("text", x = 16, y = 6.15, 
-            label = 'italic("C. anomolus")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 16, y = 5.15, 
-            label = 'italic("E. pulcher")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 16, y = 4.15, 
-            label = 'italic("E. ventermaculus")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 16, y = 3.15, 
-            label = 'italic("H. vulgaris")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 16, y = 2.15, 
-            label = 'italic("E. guttata")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 16, y = 1.15, 
-            label = 'italic("H. fuscopinna")', size = 2.5, parse = TRUE) +
-    annotate("text", x = 9.5, y = 7.1, size = 3, label = "(a)")
+  scale_x_continuous(limits = c(10,15.5), breaks = seq(10,15.5,1))
   
 ctmin.pred.plot
 
@@ -810,7 +772,7 @@ ctplots <- gbm::grid.arrange( mylegend, gridExtra::arrangeGrob(ctmin.pred.plot +
                          nrow=1),
             nrow=2, heights=c(1, 12))
 
-ggsave("Plots/Fig3_MS.pdf", plot = ctplots, width = 8, height = 7)
+ggsave("Plots/Fig3_MS.pdf", plot = ctplots, width = 10, height = 10)
 ```
 
 ```{r}
@@ -2032,6 +1994,49 @@ pred.modularity <- as.data.frame(mod.coi@modules[-1, -c(1,2) ]) %>%
 
 write.csv(pred.modularity, file = "Data/COImembership_20iter.csv")
 
+
+
+prey.mod.csv <- read.csv(file = "Data/COImembership_20iter.csv") %>%
+  select(-X)
+
+module.tree <- network.coi.plot %>%
+  inner_join(prey.mod.csv, by = c("ID.match", "Location", "Tax"))
+
+
+share.color <- module.tree %>%
+  ungroup() %>%
+  select(ID, Location) %>%
+  distinct() 
+
+shared <- share.color %>%
+  mutate(indicator = 1) %>%
+  group_by(ID) %>%
+  summarize(shared = sum(indicator)) %>%
+  mutate(sharedornot = case_when(shared == 1 ~ "unique",
+                                 TRUE ~ "Shared")) %>%
+  right_join(share.color) %>%
+  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
+                                 TRUE ~ paste(sharedornot)))
+  
+network.coi.plot.comb <- module.tree %>%
+  left_join(shared, by = "ID") 
+
+uaecols.network <- c(uaecols, "grey69")
+
+network.plot.coi <- ggplot(data = network.coi.plot.comb) +
+  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = module, colour = share.color),
+  lwd=3, labelon = F, ealpha = 0.2, arrowsize = 0.1, linewidth = 0.2, 
+  vjust = 0.5, hjust = 0.5) +
+  # labelcolour = cfnet2$lcolour) +
+  theme_net() +
+  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
+  scale_color_manual(values = uaecols.network) +
+  theme(legend.position = "right")
+network.plot.coi
+ggsave("Plots/module_tree.pdf", plot = network.plot.coi, width = 8, height = 8, useDingbats=FALSE)
+
+
+
 helper <- pred.modularity %>%
   arrange(ID.match, taxloc)
 ###visualize clusters
@@ -2132,6 +2137,47 @@ pred.modularity.23s <- as.data.frame(mod.23s@modules[-1, -c(1,2) ]) %>%
   unite(taxloc, ID.match, col = "xval", remove = F)
 
 write.csv(pred.modularity.23s, file = "Data/23smembership_20iter.csv")
+
+prey.mod.23s <- read.csv(file = "Data/23smembership_20iter.csv") %>%
+  select(-X)
+
+module.tree.23s <- network.coi.plot %>%
+  inner_join(prey.mod.23s, by = c("ID.match", "Location", "Tax"))
+
+
+share.color.23s <- module.tree.23s %>%
+  ungroup() %>%
+  select(ID, Location) %>%
+  distinct() 
+
+shared.23s <- share.color.23s %>%
+  mutate(indicator = 1) %>%
+  group_by(ID) %>%
+  summarize(shared = sum(indicator)) %>%
+  mutate(sharedornot = case_when(shared == 1 ~ "unique",
+                                 TRUE ~ "Shared")) %>%
+  right_join(share.color.23s) %>%
+  mutate(share.color.23s = case_when(sharedornot == "unique" ~ paste(Location),
+                                 TRUE ~ paste(sharedornot)))
+  
+network.23s.plot.comb <- module.tree.23s %>%
+  left_join(shared, by = "ID") 
+
+uaecols.network <- c(uaecols, "grey69")
+
+network.plot.23s <- ggplot(data = network.23s.plot.comb) +
+  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = module, colour = share.color),
+  lwd=3, labelon = F, ealpha = 0.2, arrowsize = 0.1, linewidth = 0.2, 
+  vjust = 0.5, hjust = 0.5) +
+  # labelcolour = cfnet2$lcolour) +
+  theme_net() +
+  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
+  scale_color_manual(values = uaecols.network) +
+  theme(legend.position = "right")
+network.plot.23s
+ggsave("Plots/module_tree_23s.pdf", plot = network.plot.23s, width = 8, height = 8, useDingbats=FALSE)
+
+
 ###visualize clusters
 moduleplot.23s <- ggplot(pred.modularity.23s, aes(x = xval, y = as.factor(module), fill = Location, color = Location)) +
   geom_tile(color = "black", position = "identity", height = 0.75, width = 1) +
