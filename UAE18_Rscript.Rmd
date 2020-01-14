@@ -6,6 +6,11 @@ output: html_document
 editor_options:
   chunk_output_type: console
 ---
+Title: Energetic demands of extreme temperatures reduce cryptobenthic coral reef fish diversity and functioning 
+
+Authors: Simon J. Brandl, Jacob L. Johansen, Jordan M. Casey, Luke Tornabene, Renato A. Morais, John A. Burt 
+
+In this paper, we sampled cryptobenthic reef fishes from the Arabian Gulf, the world's hottest coral reef environment, and the nearby Gulf of Oman. We compared the community structure of cryptobenthics in both locations and sought to determine species-specific physiological or dietary traits that may underpin the presence or absence of species in the Arabian Gulf. We also compared the size structure and abundance of three species with populations in both locations. Finally, we used a theoretical population model to estimate the production, transfer,m and renewal of biomass through cryptobenthics in both locations.
 
 ```{r SETUP, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -24,8 +29,8 @@ library(brms)
 library(fishualize)
 library(modelr)
 library(beepr)
-library(png)
 library(grid)
+library(emmeans)
 library(scales)
 library(iNEXT)
 library(geomnet)
@@ -34,49 +39,65 @@ library(extrafont)
 library(xgboost)
 library(igraph)
 library(bipartite)
-devtools::load_all("rfishprod")
+library(oceanmap)
+library(ncdf4)
+library(raster)
+library(rvest)     
+library(stringr)
 ```
 
-```{r LOAD DATASETS AND SILHOUETTES}
+The study consists of three main datasets: community structure of cryptobenthics, individual temperature tolerances of a subset of species, and the results of gut content DNA metabarcoding using two distinct primers (COI and 23S). Descriptions of the datasets are provided below.
+
+```{r LOAD DATASETS AND SET AESTHETICS}
 #load datasets
-comms <- read.csv(file = "Data/UAE18_RawData_Comms.csv")
-ctdat <- read.csv(file = "Data/UAE_CT.csv")
+# 1. comms = Community dataset from cryptobenthic fish collections, performed via enclosed clove-oil stations. Contains each caught individual of cryptobenthic fish (as rows). Columns specify each individuals corresponding sampling information (location, site, outcrop, lat & long, curved surface length, depth), identity, size, etc. All collections done April and May 2018. Piping creation of a new column "Genspe" for Genus and Species identity combined.
+comms <- read.csv(file = "Data/UAE18_RawData_Comms.csv") %>%
+  mutate(Genspe = paste(substr(Genus, 0,3), Species, sep = ". "))
+
+# 2. benthcomm = Benthic composition dataset which quantifies benthos on cryptobenthic fish sampling stations. Obtained through photoquadrats (five per station) and computer-based analyses of 16 evenly spaced dotsacross a grid. Each row is a dot in the grid, with columns indicating sample information (location, site, outcrop) and the encountered benthic substrate/organism.
 benthcomm <- read.csv(file = "Data/benthic_commcomp.csv")
-comms$Genspe <- paste(substr(comms$Genus, 0,3), comms$Species, sep = ". ")
-ctdat$Genspe <- paste(substr(ctdat$Genus, 0,3), ctdat$Species, sep = ". ")
-ctdat <- ctdat %>% mutate(Distribution = case_when(Tax == "ECSEPULC" ~ "AG+GoM",
-                                         Tax == "CORYANOM" ~ "AG+GoM",
-                                         Tax == "ENNEVENT" ~ "AG+GoM",
-                                         Tax == "HELCFUSC" ~ "GoM",
-                                         Tax == "HETEVULG" ~ "GoM",
-                                         Tax == "EVIOGUTT" ~ "GoM"))
-ctmax <- subset(ctdat, ctdat$Ctmax != "NA")
-ctmin <- subset(ctdat, ctdat$Ctmin != "NA")
 
+# 3. ctdat = Critical thermal minima and maxima dataset. Obtained through individual laboratory trials of wild caught fishes. Each row corresponds to an individual with columns indicating its origin, laboratory information, taxonomic identity, size, and the temperature at which the fish lost equilibrium (cf. Beitinger et al. 2000). Piping creation of a new column "Genspe" for Genus and Species identity combined.
+ctdat <- read.csv(file = "Data/UAE_CT.csv") %>%
+    mutate(Genspe = paste(substr(Genus, 0,3), Species, sep = ". "))
 
-# silhouettes for study species
-img <- readPNG("Plots/Canomalus.png")
-canom <- rasterGrob(img, interpolate=TRUE)
+# 4. ctmax and ctmin = Parsing the CT dataset into CTmax and CTmin trials.
+ctmax <- ctdat %>%
+  filter(Ctmax != "NA")
 
-img <- readPNG("Plots/Epulcher.png")
-epulc <- rasterGrob(img, interpolate=TRUE)
+ctmin <- ctdat %>%
+  filter(Ctmin != "NA")
 
-img <- readPNG("Plots/Eventermaculus.png")
-event <- rasterGrob(img, interpolate=TRUE)
+# 5. guts.meta = Dataset of gut dissections and extraction numbers for each individual fish. Each row represents an individual with columns indicating well numbers, collection IDs, taxonomic identity etc. 
+guts.meta <- read.csv(file = "Data/UAE_Metabarcoding.csv")
 
-img <- readPNG("Plots/Hvulgaris.png")
-hvulg <- rasterGrob(img, interpolate=TRUE)
+# 6. coi.seqs = Dataset of sequences obtained from gut-content DNA metabarcoding with cytochrome oxidase subunit I (COI) primers. Each row represents a dietary sequences, while columns contain information about the sequence (DNA sequence, taxonomic information, identity match) and the numbnre of sequences across fish individuals. Piping excludes two individuals without prey sequence reads ("select") and removes self-hit sequences across the entire database along with human hits and fish species that were excluded as possible prey items (e.g. Oncorhynchus nerka, a salmonid from the Pacific Northwest).
+coi.seqs <- read.csv(file = "Data/UAE_COI.csv") %>%
+  dplyr::select(-c(UAE18862.1, UAE18400.1)) %>%
+  filter(!species %in% c("Coryogalops anomolus", 
+                         "Neopomacentrus miryae", 
+                         "Ecsenius pulcher", 
+                         "Belonidae sp. BOLD:AAE0217", 
+                         "Eviota guttata", 
+                         "Etheostoma flabellare", 
+                         "Homo sapiens", 
+                         "Butis gymnopomus",
+                         "Dinematichthys iluocoeteoides",
+                         "Oncorhynchus nerka"))
 
-img <- readPNG("Plots/Eguttata.png")
-egutt<- rasterGrob(img, interpolate=TRUE)
+# 7. seqs23s = Dataset of sequences obtained from gut-content DNA metabarcoding with 23S primers. Same setup as COI dataset. Same two individuals removed due to lack of prey items sequences. No self-hit removal necessary.
+seqs23s <- read.csv(file = "Data/UAE_23S.csv") %>%
+  select(-c(UAE18862.1, UAE18400.1))
 
-img <- readPNG("Plots/Hfuscopinna.png")
-hfusc <- rasterGrob(img, interpolate=TRUE)
+# 8. size.strs = Dataset of individuals (subset of comms) that contains only sizes an species affiliations for the three species commonly encountered in both locations.
+size.strs <- read.csv(file = "Data/UAE_cryptosize_comb.csv")
 
-
+# set color scheme for all plots using fishualize package
 uaecols <- fish(n = 2, option = "Trimma_lantana", end = 0.3)
+#check colors
 image(volcano, col = uaecols)
 
+# set theme for all plots as theme_sjb
 theme_sjb <- function (base_size = 8, base_family = "") {
   theme_bw() %+replace% 
     theme(panel.background = element_blank(),
@@ -88,29 +109,112 @@ theme_sjb <- function (base_size = 8, base_family = "") {
           legend.title=element_text(size=8), 
           legend.text=element_text(size=8))
 }
+#end of chunk
 ```
 
-```{r COMMUNITY STRUCTURE: ABUNDANCE, BIOMASS, DIVERSITY}
-#start with community analyses
-# 1. compare abundance, biomass, diversity
-# 2. compare community composition
-# calculate surface area for each bommie 
-# radius first (2*curved surface length/2*pi)
+To highlight the varying temperature profiles of the two sampled regions, we provide a map of maximum temperatures from 2010 to 2018. Data were downloaded from the MODIS Aqua Database (https://oceandata.sci.gsfc.nasa.gov/MODIS-Aqua/Mapped/Daily/4km/sst, Access Date: 07/01/2020). Maximum and minimum cell values for each year are obtained in the auxilliary script "MODIS Aqua Temperature Data".
+
+```{r TEMPERATURE MAP OF AREA}
+# This script connects to auxilliary script entitled "MODIS Aqua Temperature Data"
+####Maximum####
+# Load maximum temperature data 2010 - 2018
+max2010 = stack("Data/sst_data/max_sst2010.tif")
+max2011 = stack("Data/sst_data/max_sst2011.tif")
+max2012 = stack("Data/sst_data/max_sst2012.tif")
+max2013 = stack("Data/sst_data/max_sst2013.tif")
+max2014 = stack("Data/sst_data/max_sst2014.tif")
+max2015 = stack("Data/sst_data/max_sst2015.tif")
+max2016 = stack("Data/sst_data/max_sst2016.tif")
+max2017 = stack("Data/sst_data/max_sst2017.tif")
+max2018 = stack("Data/sst_data/max_sst2018.tif")
+
+# stack all raster files
+max.sst.all <- stack(max2010,
+                     max2011,
+                     max2012,
+                     max2013,
+                     max2014, 
+                     max2015, 
+                     max2016, 
+                     max2017, 
+                     max2018)
+
+# get daily max temperature estimate across all years
+max.max.sst.all <- max(max.sst.all)
+
+# define color palette for max map
+vpal = fish(100, alpha = 1, begin = 0.1, end = 1, option = "Trimma_lantana")
+
+####Fig. 1a####
+v(max.max.sst.all, cbpos = "l", pal = vpal, zlim = c(28, 35), grid = T,  Save = T, plotname = "max.max.sst", fileformat = "png")
+# separately plot legend because I'm to thick to figure out another way
+v(max.max.sst.all, cbpos = "r", pal = vpal, zlim = c(28, 35), grid = T,  Save = T, plotname = "max.max.sst.legend", fileformat = "png")
+
+
+####Minimum####
+# Load minimum temperature data 2010 - 2018
+min2010 = stack("Data/sst_data/min_sst2010.tif")
+min2011 = stack("Data/sst_data/min_sst2011.tif")
+min2012 = stack("Data/sst_data/min_sst2012.tif")
+min2013 = stack("Data/sst_data/min_sst2013.tif")
+min2014 = stack("Data/sst_data/min_sst2014.tif")
+min2015 = stack("Data/sst_data/min_sst2015.tif")
+min2016 = stack("Data/sst_data/min_sst2016.tif")
+min2017 = stack("Data/sst_data/min_sst2017.tif")
+min2018 = stack("Data/sst_data/min_sst2018.tif")
+
+# stack all raster files
+min.sst.all <- stack(min2010, 
+                     min2011, 
+                     min2012, 
+                     min2013, 
+                     min2014, 
+                     min2015, 
+                     min2016, 
+                     min2017, 
+                     min2018)
+
+# get daily min temperature estimate across all years
+min.min.sst.all <- min(min.sst.all)
+
+# define color palette for minimum values
+vpalmin = fish(100, alpha = 1, begin = 0, end = 0.8, option = "Coryphaena_hippurus")
+
+####Fig. 1b####
+v(min.min.sst.all, cbpos = "l", pal = vpalmin, zlim = c(16, 22), grid = T,  Save = T, plotname = "min.min.sst", fileformat = "png")
+# same as above
+v(min.min.sst.all, cbpos = "r", pal = vpalmin, zlim = c(16, 22), grid = T,  Save = T, plotname = "min.min.sst.legend", fileformat = "png")
+```
+
+We analyzed the community structure based on samples obtained via enclosed clove-oil stations. At every location, we sampled three distinct reefs (henceforth "Site"), and at each reef, we performed three separate clove-oil station collections. Every fish obtained from the samples was measured, weighed, identified, photographed, and stored in 95% ethanol. The dataset  is based on each individual fish (across rows), with all metadata stored in columns.
+
+```{r COMMUNITY STRUCTURE: DIVERSITY, ABUNDANCE, BIOMASS}
+# Analyses to compare the diversity (species density), abundance (individual density) and biomass of cryptobenthic communities in the Arabian Gulf and Gulf of Oman. 
+
+####1.Data wrangling#####
+
+# calculate surface area for each reef outcrop using formulas to get from curved surface length to hemispheric area
+# calculate radius first (2*curved surface length/2*pi)
 comms$radius <- (2*comms$Dimension)/(2*pi)
-# surface area (4*pi*radius^2)/2 and divide by 10000 for square meters
+
+# calculate surface area (4*pi*radius^2)/2 and divide by 10000 for square meters
 comms$SA <- ((4*pi*comms$radius^2)/2)/10000
 
+# create a list of taxa for each location to investigate records in the Arabian Gulf (Table S1)
 taxlists <- comms %>%
   group_by(Family, Genus, Species, Location) %>%
   summarize(value = n())%>%
   pivot_wider(names_from = Location, values_from = value, values_fill = list(value = 0))
+
+# taxlist: a data frame with each row representing a species. Columns hold taxonomic information and total abundance in the Arabian Gulf and Gulf of Oman.
 write.csv(taxlists, file = "Data/TaxaListLocation.csv")
 
-###some metadata for paper
+# get average GPS coordinates for each sampled site
 loccoord <- comms %>%
   group_by(Site) %>%
   summarize(lat = mean(Lat), long = mean(Long))
 
+# get average surface area anbd standard errors of outcrops sampled in the Arabian Gulf and Gulf of Oman
 saavg <- comms %>%
   group_by(Site, Location) %>%
   summarize(meansite = mean(SA)) %>%
@@ -119,7 +223,7 @@ saavg <- comms %>%
   summarize(meansa = mean(meansite), sdsa = sd(meansite), n = n(), sesa = sdsa/sqrt(n))
 
 
-###get biomass and diversity estimates for Arabian Gulf and Gulf of Oman
+# finally, get diversity, abundance, and biomass estimates by summing the number of taxa, number of indidivuals, and weight over each sampled outcrop. Site intercepts are added for plotting purposes.
 comm_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summarize(Biomass = sum(W), Abundance = n(), Speciesrichness = length(unique(Genspe)), SA = mean(SA)) %>%
   mutate(Density = Abundance/SA,
          Biomass_per_m2 = Biomass/SA,
@@ -132,113 +236,35 @@ comm_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summa
                                      Site == "Snoopy" ~ 0.70),
          site_reord = factor(Site, levels = sort(levels(site_intercepts))))
 
-###
+# calculate quick summary statistics
 comm_summary <- comm_means %>%
   group_by(Location) %>%
   summarize(mdens = mean(Abundance), mric = mean(Speciesrichness))
 
-#run GLM with abundance data and offset for surface area sampled
-abundance.model <- brm(log(Density) ~ Location + (1|Site), 
-                            data = comm_means, control = list(adapt_delta = 0.999, max_treedepth = 15))
-
-summary(abundance.model)
-abu.pred <- comm_means %>%
-  ungroup() %>%
-  group_by(Location) %>%
-  select(Location, Site) %>%
-  add_predicted_draws(abundance.model, n = 1000) %>%
-  mutate(pred.density = exp(.prediction))
-
-abu.median <- abu.pred %>%
-  group_by(Location) %>%
-  summarize(median = median(pred.density), sd = sd(pred.density)) %>%
-  mutate(se = sd/sqrt(18))
-abu.median
-
-abu.pred.plot <- ggplot(data = abu.pred) +
-  geom_halfeyeh(aes(y = rev(Location), x = pred.density, fill = Location), color = "black") +
-  geom_jitter(aes(x = Density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
-             data = comm_means, height = 0.02, 
-             alpha = 0.5, size = 0.8) +
-  scale_color_manual(values = uaecols) +
-  scale_fill_manual(values = alpha(uaecols, 0.5)) +
-  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-  scale_x_log10(expand = c(0,0), limits = c(0.1,1e3), breaks=c(0,0.1,1,10,100,1000), labels=c(0,0.1,1,10,100,1000)) +
-    annotation_logticks(base = 10, sides = "b",
-                          short = unit(1,"mm"),
-                        mid = unit(1,"mm"),
-                        long = unit(2,"mm")) +
-  theme_sjb() +
-  theme(axis.text.y = element_blank(), 
-        axis.ticks.y = element_blank(),
-        axis.title.y = element_blank(),
-        legend.position = "top",
-        legend.box = "vertical") +
-  guides(fill = guide_legend(nrow = 1),
-         shape = guide_legend(nrow = 1)) +
-  xlab(expression(paste("Density of cryptobenthic fishes (individuals ", m^{-2},")")))+
-  annotate("text", x = 0.15, y = 2.7, size = 3, label = "(b)", color = "black")
-abu.pred.plot
-
-ggsave("Plots/abupred.pdf", abu.pred.plot, width = 8, height = 4, useDingbats = F)
 
 
-###############biomass
-
-#run GLM with abundance data and offset for surface area sampled
-biomass.model <- brm(log(Biomass_per_m2) ~ Location + (1|Site), 
-                            data = comm_means, 
-                     control = list(adapt_delta = 0.9999, max_treedepth = 15))
-summary(biomass.model)
-bio.pred <- comm_means %>%
-  ungroup() %>%
-  group_by(Location) %>%
-  select(Location, Site) %>%
-  add_predicted_draws(biomass.model, n = 1000) %>%
-  mutate(pred.biomass = exp(.prediction))
-
-bio.median <- bio.pred %>%
-  group_by(Location) %>%
-  summarize(median = median(pred.biomass), sd = sd(pred.biomass)) %>%
-  mutate(se = sd/sqrt(18))
-bio.median
-
-bio.pred.plot <- ggplot(data = bio.pred) +
-  geom_halfeyeh(aes(y = rev(Location), x = pred.biomass, fill = Location), color = "black") +
-  geom_jitter(aes(x = Biomass_per_m2, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
-             data = comm_means, height = 0.02, 
-             alpha = 0.5, size = 0.8) +
-  scale_color_manual(values = uaecols) +
-  scale_fill_manual(values = alpha(uaecols, 0.5)) +
-  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-  scale_x_log10(expand = c(0, 0), limits = c(0.1,1000), breaks=c(0.1,1,10,100,1000), labels=c(0.1,1,10,100,1000)) +
-    annotation_logticks(base = 10, sides = "b",
-                          short = unit(1,"mm"),
-                        mid = unit(1,"mm"),
-                        long = unit(2,"mm")) +
-  theme_sjb() +
-  theme(axis.text.y = element_blank(), 
-        axis.ticks.y = element_blank(),
-        axis.title.y = element_blank(),
-        legend.position = "top",
-        legend.box = "vertical") +
-  guides(fill = guide_legend(nrow = 1),
-         shape = guide_legend(nrow = 1)) +
-  xlab(expression(paste("Biomass of cryptobenthic fishes (grams ", m^{-2},")")))+
-  annotate("text", x = 0.15, y = 2.7, size = 3, label = "(c)", color = "black")
-
-bio.pred.plot
-
-ggsave("Plots/biopred.pdf", bio.pred.plot, width = 8, height = 4, useDingbats = F)
+####2.Data analysis####
 
 
-###############biomass
+# Three Bayesian hierarchical models, analyzing ther effect of location on community structure
 
-#run GLM with abundance data and offset for surface area sampled
+# c) Diversity (quantified as species density) 
+# run brms model with Location as fixed effect and Site as random effect
 diversity.model <- brm(log(Species_density) ~ Location + (1|Site), 
                             data = comm_means,
                      control = list(adapt_delta = 0.999, max_treedepth = 15))
+
+# model summary
 summary(diversity.model)
+# Population-Level Effects: 
+#             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept       0.48      0.10     0.28     0.68 1.00     2505     1657
+# LocationGoO     0.72      0.14     0.44     0.98 1.00     2168     1691
+
+# plot chains to validate (muted)
+# plot(diversity.model)
+
+# now use model coefficients to predict values
 div.pred <- comm_means %>%
   ungroup() %>%
   group_by(Location) %>%
@@ -246,14 +272,13 @@ div.pred <- comm_means %>%
   add_predicted_draws(diversity.model, n = 1000) %>%
   mutate(pred.diversity = exp(.prediction))
 
-div.median <- div.pred %>%
-  group_by(Location) %>%
-  summarize(median = median(pred.diversity), sd = sd(pred.diversity)) %>%
-  mutate(se = sd/sqrt(18))
-div.median
 
+####Fig 1c####
+#Raincloud plot of predicted values with raw values of species density superimposed
 div.pred.plot <- ggplot(data = div.pred) +
+  # plot posterior density curves
   geom_halfeyeh(aes(y = rev(Location), x = pred.diversity, fill = Location), color = "black") +
+  # add dots for raw values
   geom_jitter(aes(x = Species_density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
              data = comm_means, height = 0.02, 
              alpha = 0.5, size = 0.8) +
@@ -275,32 +300,151 @@ div.pred.plot <- ggplot(data = div.pred) +
   guides(fill = guide_legend(ncol = 1),
          shape = guide_legend(ncol = 1)) +
   xlab(expression(paste("Species richness of cryptobenthic fishes (species ", m^{-2},")"))) +
-  annotate("text", x = 0.15, y = 2.7, size = 3, label = "(a)", color = "black")
+  annotate("text", x = 0.15, y = 2.7, size = 3, label = "(c)", color = "black")
 
-       
+# look at plot
 div.pred.plot
 
-ggsave("Plots/divpred.pdf", div.pred.plot, width = 8, height = 4, useDingbats = F)
 
-#function for legend
+# d) Abundance (quantified as individual density) 
+# run brms model with Location as fixed effect and Site as random effect
+abundance.model <- brm(log(Density) ~ Location + (1|Site), 
+                            data = comm_means, control = list(adapt_delta = 0.999, max_treedepth = 15))
+
+# model summary
+summary(abundance.model)
+# Population-Level Effects: 
+#             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept       1.70      0.27     1.18     2.23 1.00     1413     1233
+# LocationGoO     1.76      0.39     0.99     2.49 1.00     1445     1065
+
+# plot chains to validate (muted)
+# plot(abundance.model)
+
+# now use model coefficients to predict values
+abu.pred <- comm_means %>%
+  ungroup() %>%
+  group_by(Location) %>%
+  select(Location, Site) %>%
+  add_predicted_draws(abundance.model, n = 1000) %>%
+  mutate(pred.density = exp(.prediction))
+
+####Fig 1d####
+#Raincloud plot of predicted values with raw values of individual density superimposed. 
+abu.pred.plot <- ggplot(data = abu.pred) +
+  # plot posterior density curves
+  geom_halfeyeh(aes(y = rev(Location), x = pred.density, fill = Location), color = "black") +
+  # add dots for raw values
+  geom_jitter(aes(x = Density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
+             data = comm_means, height = 0.02, 
+             alpha = 0.5, size = 0.8) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = alpha(uaecols, 0.5)) +
+  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
+  scale_x_log10(expand = c(0,0), limits = c(0.1,1e3), breaks=c(0,0.1,1,10,100,1000), labels=c(0,0.1,1,10,100,1000)) +
+    annotation_logticks(base = 10, sides = "b",
+                          short = unit(1,"mm"),
+                        mid = unit(1,"mm"),
+                        long = unit(2,"mm")) +
+  theme_sjb() +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = "top",
+        legend.box = "vertical") +
+  guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  xlab(expression(paste("Density of cryptobenthic fishes (individuals ", m^{-2},")")))+
+  annotate("text", x = 0.15, y = 2.7, size = 3, label = "(d)", color = "black")
+
+# look at plot
+abu.pred.plot
+
+
+# e) Biomass (quantified as grams per unit area) 
+# run brms model with Location as fixed effect and Site as random effect
+biomass.model <- brm(log(Biomass_per_m2) ~ Location + (1|Site), 
+                            data = comm_means, 
+                     control = list(adapt_delta = 0.9999, max_treedepth = 15))
+
+#model summary
+summary(biomass.model)
+# Population-Level Effects: 
+#             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept       2.10      0.37     1.38     2.81 1.00     2055     1604
+# LocationGoO     0.65      0.50    -0.32     1.66 1.00     1851     1516
+
+# plot chains to validate (muted)
+# plot(abundance.model)
+
+# now use model coefficients to predict values
+bio.pred <- comm_means %>%
+  ungroup() %>%
+  group_by(Location) %>%
+  select(Location, Site) %>%
+  add_predicted_draws(biomass.model, n = 1000) %>%
+  mutate(pred.biomass = exp(.prediction))
+
+####Fig 1e####
+#Raincloud plot of predicted values with raw values of biomass superimposed. 
+bio.pred.plot <- ggplot(data = bio.pred) +
+  # plot posterior density curves
+  geom_halfeyeh(aes(y = rev(Location), x = pred.biomass, fill = Location), color = "black") +
+  # add dots for raw values
+  geom_jitter(aes(x = Biomass_per_m2, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
+             data = comm_means, height = 0.02, 
+             alpha = 0.5, size = 0.8) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = alpha(uaecols, 0.5)) +
+  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
+  scale_x_log10(expand = c(0, 0), limits = c(0.1,1000), breaks=c(0.1,1,10,100,1000), labels=c(0.1,1,10,100,1000)) +
+    annotation_logticks(base = 10, sides = "d",
+                          short = unit(1,"mm"),
+                        mid = unit(1,"mm"),
+                        long = unit(2,"mm")) +
+  theme_sjb() +
+  theme(axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = "top",
+        legend.box = "vertical") +
+  guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  xlab(expression(paste("Biomass of cryptobenthic fishes (grams ", m^{-2},")")))+
+  annotate("text", x = 0.15, y = 2.7, size = 3, label = "(e)", color = "black")
+
+# look at plot
+bio.pred.plot
+
+# now combine all three plots for Figure 1
+
+# function for legend
 g_legend<-function(a.gplot){
   tmp <- ggplot_gtable(ggplot_build(a.gplot))
   leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
   legend <- tmp$grobs[[leg]]
   return(legend)}
 
+# define legend
 mylegend<-g_legend(div.pred.plot)
 
+####Final figure: Figure 1cde####
 Fig1 <- gbm::grid.arrange(gridExtra::arrangeGrob(div.pred.plot + theme(legend.position="none"),
                          abu.pred.plot + theme(legend.position="none"),
                          bio.pred.plot + theme(legend.position="none"),
                          nrow=3), mylegend, 
             ncol=2, widths=c(6,1))
 
-ggsave("Plots/Fig1_MS.pdf", Fig1, width = 6, height = 8, useDingbats = F)
+# save figure 1 (muted)
+# ggsave("Plots/Fig1_MS.pdf", Fig1, width = 6, height = 8, useDingbats = F)
 ```
 
-```{r COMMUNITY COMPOSITION NMDS}
+Furthermore, we sought to determine compositional differences in the cryptobenthic fish communities using the same dataset. We also analyzed the benthic community structure based on photo-quadrats to examine whether be nthic differences may drive the observed divergence in fish communities.
+
+```{r COMMUNITY COMPOSITION: FISH AND BENTHOS}
+# Analysis to examine community composition across the two locations
+####Cryptobenthic fishes####
+####1. Data wrangling####
 comms.overview <- comms %>%
   dplyr::select(Location, Tax) %>%
   distinct() %>%
@@ -310,69 +454,66 @@ comms.overview <- comms %>%
   mutate(shared = case_when(count == 2 ~ "shared",
                             count == 1 ~ case_when(Location == "GoO" ~ "GoO",
                                                    TRUE ~ "AG")))
-
+# get shared vs. unique species
 table(comms.overview$shared)
   
-
+# transform into wide format
 comms$count = 1
 comms_wide <- comms %>% 
   group_by(Location, Site, Sitenumber, Genspe) %>%
   summarize(totaln = sum(count)) %>%
   spread(Genspe, totaln, fill = 0) 
 
-###run MDS
+####2. Data analysis####
+# run nMDS ordination with Bray Curtis metric
 comp_mds <- metaMDS(comms_wide[-c(1:3)], metric = "bray", trymax = 1000)
+
+# MDS summary
 comp_mds
+# check stress
 stressplot(comp_mds)
 
+# run PERMANOVA to test for effect of Location
 perm <- adonis(comms_wide[-c(1:3)] ~ Location, comms_wide, distance = "Bray", permutations = 999)
 
-comp_sim <- as.list(simper(comms_wide[-c(1:3)], comms_wide$Location))
-simsum <- summary(comp_sim)
-
-simspecies <- as.data.frame(simsum$AG_GoO) %>%
-  mutate(Genspe = rownames(.)) %>%
-  filter(average >0.025)
-simspecies
-
-
-###get values and plot in ggplot
+# store MDS values and combine with metadata from wide-format community data
 site.scores <- as.tibble(scores(comp_mds)) %>%
   mutate(Location = comms_wide$Location,
          Site = comms_wide$Site,
          Sitenumber = comms_wide$Sitenumber) %>% 
   inner_join(comm_means)
 
+# create convex hulls function
+convex_hull <- function(site.scores) site.scores[chull(site.scores$NMDS1, site.scores$NMDS2),] 
+
+# run convex hulls on locations
+location_hulls <- ddply(site.scores, "Location", convex_hull)
 
 
+# now do SIMPER analysis to identify species with highest pull
+comp_sim <- as.list(simper(comms_wide[-c(1:3)], comms_wide$Location))
+simsum <- summary(comp_sim)
+
+# extract species with >0.025 contribution to cumsum
+simspecies <- as.data.frame(simsum$AG_GoO) %>%
+  mutate(Genspe = rownames(.)) %>%
+  filter(average >0.025)
+simspecies
+
+# store point estimates of species and combine with simper results
 mds.points <- as.data.frame(scores(comp_mds, "species")) %>%
   add_column(Genspe = rownames(.)) %>%
   right_join(simspecies)
 
-genspeabu <- comms %>%
-  group_by(Genspe, Family) %>%
-  summarize(count = n()) %>%
-  inner_join(mds.points)
-
-point.plot <- ggplot(genspeabu) +
-  theme_bw() +
-  geom_segment(aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
-               arrow = arrow(length = unit(0.1, "cm")),
-               inherit.aes = F) +
-  geom_text_repel(aes(x=NMDS1, NMDS2, label=Genspe), size=2, inherit.aes = F)
-point.plot
-###create convex hulls function
-convex_hull <- function(site.scores) site.scores[chull(site.scores$NMDS1, site.scores$NMDS2),] 
-
-###run convex hulls on habitats
-location_hulls <- ddply(site.scores, "Location", convex_hull)
+# not run
+# genspeabu <- comms %>%
+#   group_by(Genspe, Family) %>%
+#   summarize(count = n()) %>%
+#   inner_join(mds.points)
 
 
-###create vector with habitat names in center of convex hulls
-location_centers <- location_hulls %>% group_by(Site) %>% summarize(NMDS1 = mean(NMDS1), NMDS2 = mean(NMDS2))
-
-###plot mds results
-# plot one species name
+####Fig. 2a####
+# ggplot with MDS results, location convex hulls, and SIMPER species highlighted
 comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
   #overlay convex hulls
   geom_polygon(data = location_hulls, aes(x = NMDS1, y = NMDS2, 
@@ -382,7 +523,7 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
   #overlay points
   geom_point(aes(color = Location, group = Location, fill = Location,
                              shape = reorder(Site, sort(as.numeric(site_intercepts))))) +
-    geom_segment(data = genspeabu, aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
+  geom_segment(data = genspeabu, aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
                arrow = arrow(length = unit(0.2, "cm")), color = "black", lwd = 0.25,
                inherit.aes = F) +
   geom_text_repel(data = genspeabu, aes(x=NMDS1, NMDS2, label=Genspe), size=3, inherit.aes = F) +
@@ -400,9 +541,290 @@ comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
   xlab("NMDS1") +
   ylab("NMDS2")
 
+# check plot
 comp_plot
-ggsave("Plots/Fig2_MS.pdf", plot = comp_plot, width = 8, height = 8, useDingbats = TRUE)
+# muted
+# ggsave("Plots/Fig2_MS.pdf", plot = comp_plot, width = 8, height = 8, useDingbats = TRUE)
+
+####Benthos####
+####1. Data wrangling####
+
+# get data into tidy format
+benth.tidy <- benthcomm %>%
+  # combine coral categories into coarser categories
+  mutate(category_tidy = case_when(category == "livecoral_encrusting" ~ "livecoral_other",
+                                   category == "livecoral_foliose" ~ "livecoral_other",
+                                   category == "livecoral_massive" ~ "livecoral_other",
+                                   TRUE ~ as.character(category))) %>%
+  # remove unidentifiable points
+  filter(category != "unidentifiable") %>% 
+  group_by(category) %>%
+  # get numbers and percentages
+  mutate(total_cat = n()) %>%
+  ungroup() %>%
+  filter(total_cat >= 3) %>%
+  group_by(location, site, sitename, category_tidy) %>%
+  summarize(total = n()) %>%
+  ungroup() %>%
+  group_by(location, site, sitename) %>%
+  mutate(category_percent = total/sum(total)) %>%
+  dplyr::select(-total) %>%
+  # turn into wide format again
+  pivot_wider(names_from = category_tidy, values_from = category_percent,
+    values_fill = list(category_percent = 0))
+
+# get values for coral cover
+benth.cc <- benth.tidy %>%
+  dplyr::select(location, site, sitename, livecoral_other, livecoral_branching) %>%
+  mutate(total_cc = livecoral_other+livecoral_branching)
+
+###run mds
+benth.mds <- metaMDS(benth.tidy[-c(1:4)], metric = "Bray", trymax = 1000)
+benth.mds
+stressplot(benth.mds)
+
+perm.benth = adonis(benth.tidy[-c(1:4)] ~ location, benth.tidy, distance = "Bray", permutations = 999)
+perm.benth
+###get values and plot in ggplot
+site.scores.benth <- as.tibble(scores(benth.mds)) %>%
+  mutate(location = benth.tidy$location,
+         site = benth.tidy$site,
+         sitename = benth.tidy$sitename) %>% 
+  inner_join(benth.tidy) %>%
+  mutate(ordervar = case_when(site == "Dhabiya" ~ 1,
+                              site == "RasGhanada" ~ 2,
+                              site == "Saadiyat" ~ 3,
+                              site == "Dibba" ~ 4,
+                              site == "Sharm" ~ 5,
+                              site == "Snoopy" ~ 6)) %>%
+  mutate(Coral_cover = livecoral_other + livecoral_branching)
+
+
+mds.points.benth <- as.data.frame(scores(benth.mds, "species")) %>%
+  add_column(category = rownames(.))
+
+point.plot.benth <- ggplot(mds.points.benth) +
+  theme_sjb() +
+  geom_segment(aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
+               arrow = arrow(length = unit(0.3, "cm")), color = "grey69",
+               inherit.aes = F) +
+  theme(legend.position = "top") +
+  geom_text_repel(aes(x=NMDS1, NMDS2, label=category), size=3, inherit.aes = F) +
+  scale_y_continuous(limits = c(-0.75, 0.75), breaks = seq(-0.75, 0.75, 0.25)) +
+  scale_x_continuous(limits = c(-1.2, 1.2)) +
+  xlab("NMDS1") +
+  ylab("NMDS2")
+point.plot.benth
+###create convex hulls function
+convex_hull <- function(site.scores.benth) site.scores.benth[chull(site.scores.benth$NMDS1, site.scores.benth$NMDS2),] 
+
+###run convex hulls on habitats
+site_hulls <- ddply(site.scores.benth, "location", convex_hull)
+
+
+###create vector with habitat names in center of convex hulls
+site_centers <- site_hulls %>% group_by(location) %>% summarize(NMDS1 = mean(NMDS1), NMDS2 = mean(NMDS2))
+
+###plot mds results
+# plot one species name
+comp.plot.benth <- ggplot(site.scores.benth, aes(x = NMDS1, y = NMDS2)) +
+  #overlay convex hulls
+  #overlay points
+  geom_point(aes(color = location, group = location, fill = location, size = Coral_cover,
+                             shape = reorder(site, sort(as.numeric(ordervar))))) +
+    geom_polygon(data = site_hulls, aes(x = NMDS1, y = NMDS2, 
+                                         fill = location,
+                                         group = location),
+               alpha = 0.4, lty = 1, lwd = 0.1, color = "black") +
+    geom_segment(data = mds.points.benth, aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
+               arrow = arrow(length = unit(0.2, "cm")), color = "black", lwd = 0.25,
+               inherit.aes = F) +
+  theme(legend.position = "top") +
+  geom_text_repel(data = mds.points.benth, aes(x=NMDS1, NMDS2, label=category), size=4, inherit.aes = F) +
+  theme_bw()+
+  theme(legend.position = "top",
+        legend.title.align = 0,
+        legend.box = "horizontal") +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
+  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
+    guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+    scale_y_continuous(limits = c(-0.75, 0.75), breaks = seq(-0.75, 0.75, 0.25)) +
+  scale_x_continuous(limits = c(-1.2, 1.2)) +
+  xlab("NMDS1") +
+  ylab("NMDS2")
+
+comp.plot.benth
+
+
+#run GLM with abundance data and offset for surface area sampled
+cc.model <- brm(logit_scaled(total_cc) ~ location + (1|site), 
+                            data = benth.cc, control = list(adapt_delta = 0.999, max_treedepth = 15))
+summary(cc.model)
+
+ggsave("Plots/BenthicPlot.pdf", plot = comp.plot.benth, width = 8, height = 8, useDingbats = FALSE)
+
 ```
+
+To determine potential drivers of the recovered differences in cryptobenthic communities, we tested individual tolerances to water temoeratures in a laboratory setting. Specifically, we ran CTmin and CTmax trials, where an individual is exposed to slowlyi increasing or decreasing temperatures until it is visually affected (i.e., loss of equilibrium, uncoordinated swimming). The temperature at which this occurs is recorded as the critical thermal maximum or minimum. We ran these trials on individuals collected from six species.
+
+```{r PHYSIOLOGY: CTmax and CTmin}
+####1. Data wrangling####
+# CTmax first
+# add variable for plotting purposes and create variable that combines species id and its respective population (taxloc)
+ctmax <- ctmax %>%
+    mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
+                              Tax == "ECSEPULC" ~ 5,
+                              Tax == "ENNEVENT" ~ 4,
+                              Tax == "HETEVULG" ~ 3,
+                              Tax == "EVIOGUTT" ~ 2,
+                              TRUE ~ 1),
+           taxloc = factor(interaction(Tax, Location)))
+
+# same for CTmin
+ctmin <- ctmin %>%
+    mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
+                              Tax == "ECSEPULC" ~ 5,
+                              Tax == "ENNEVENT" ~ 4,
+                              Tax == "HETEVULG" ~ 3,
+                              Tax == "EVIOGUTT" ~ 2,
+                              TRUE ~ 1),
+           taxloc = factor(interaction(Tax, Location)))
+
+####2. Data analysis####
+# run Bayesian linear model to determine the effect of taxon and location combined ("taxloc") on thermal maxima
+maxmod <- brm(Ctmax ~ taxloc, data = ctmax,  control = list(adapt_delta = 0.995, max_treedepth = 18))
+
+# model summary
+summary(maxmod)
+# Population-Level Effects: 
+#                    Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept             38.40      0.25    37.92    38.90 1.01      690     1081
+# taxlocECSEPULC.AG     -0.47      0.29    -1.04     0.10 1.00      806     1365
+# taxlocENNEVENT.AG     -1.36      0.29    -1.94    -0.81 1.00      789     1342
+# taxlocECSEPULC.GoO    -1.11      0.29    -1.67    -0.54 1.00      831     1468
+# taxlocENNEVENT.GoO    -1.64      0.36    -2.35    -0.93 1.00     1100     1726
+# taxlocEVIOGUTT.GoO    -1.13      0.32    -1.75    -0.52 1.00      912     1572
+# taxlocHELCFUSC.GoO    -2.38      0.32    -2.99    -1.77 1.00      897     1535
+# taxlocHETEVULG.GoO    -0.48      0.29    -1.04     0.07 1.00      827     1415
+
+# plot chains (muted)
+# plot(maxmod)
+
+# predict values: using fitted values
+ctmax.pred <- ctmax %>%
+  data_grid(taxloc) %>%  
+  add_fitted_draws(maxmod, n = 1000) %>%
+  separate(taxloc, c("Tax", "Location"), remove = F) %>%
+  mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
+                              Tax == "ECSEPULC" ~ 5,
+                              Tax == "ENNEVENT" ~ 4,
+                              Tax == "HETEVULG" ~ 3,
+                              Tax == "EVIOGUTT" ~ 2,
+                              TRUE ~ 1))
+
+####Table S2####
+# also creating contrasts among different levels of the explanatory variable for Table S2
+em_max <- emmeans (maxmod,  ~ taxloc)
+contrasts_max <- contrast(em_max, "tukey")
+# show contrasts and export as Table S2 (muted)
+contrasts_max
+#write.csv(contrasts_max, file = ("Data/TableS2.csv"))
+
+# same procedure for CTmin
+minmod <- brm(Ctmin ~ taxloc, data = ctmin,  control = list(adapt_delta = 0.995, max_treedepth = 18), iter = 5000);beep(sound = "coin")
+# get summary
+summary(minmod)
+# Population-Level Effects: 
+#                    Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept             11.93      0.20    11.53    12.34 1.00     1880     2643
+# taxlocECSEPULC.AG     -0.61      0.23    -1.07    -0.16 1.00     2139     3416
+# taxlocENNEVENT.AG      0.40      0.23    -0.06     0.85 1.00     2229     3436
+# taxlocECSEPULC.GoO    -0.75      0.23    -1.21    -0.30 1.00     2214     3457
+# taxlocENNEVENT.GoO     1.39      0.26     0.88     1.90 1.00     2641     4512
+# taxlocEVIOGUTT.GoO     0.78      0.24     0.31     1.25 1.00     2315     3499
+# taxlocHELCFUSC.GoO     1.24      0.25     0.73     1.74 1.00     2347     3466
+# taxlocHETEVULG.GoO     0.08      0.24    -0.39     0.56 1.00     2230     3438
+
+####Table S3####
+# create pairwise contrasts for Table S3
+em_min <- emmeans (minmod,  ~ taxloc)
+contrasts_min <- contrast(em_min, "tukey")
+# look at table and export
+contrasts_min 
+# write.csv(contrasts_min, file = ("Data/TableS3.csv"))
+
+# fitted values for CTmin
+ctmin.pred <- ctmin %>%
+  data_grid(taxloc)%>%  
+  add_fitted_draws(minmod, n = 1000) %>%
+  separate(taxloc, c("Tax", "Location"), remove = F) %>%
+  mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
+                              Tax == "ECSEPULC" ~ 5,
+                              Tax == "ENNEVENT" ~ 4,
+                              Tax == "HETEVULG" ~ 3,
+                              Tax == "EVIOGUTT" ~ 2,
+                              TRUE ~ 1))
+
+
+####Fig. 3b####
+# 1b first because of plot arrangement. Plot fitted values with raw data as dots.
+ctmax.pred.plot <- ggplot(data = ctmax.pred) +
+  geom_halfeyeh(aes(y = ordervar, x = .value, fill = Location, group = Location))+
+  geom_jitter(aes(x = Ctmax, y = ordervar, shape = Tax, fill = Location),
+             data = ctmax, size = 1.5, color = "black", shape = 23, height = 0.1, stroke = 0.1) +
+  scale_color_manual(values = uaecols, labels = c("Arabian Gulf", "Gulf of Oman")) +
+  scale_fill_manual(values = alpha(uaecols, 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
+  scale_shape_manual(values = c(8, 21:25)) +
+    theme_sjb() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        legend.position = "top") +
+  guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  xlab("Critical thermal maximum (º Celsius)") +
+  scale_x_continuous(limits = c(35,40), breaks = seq(35,40,1))
+
+# show plot  
+ctmax.pred.plot
+
+
+####Fig. 3a####
+# same plot as CTmax
+ctmin.pred.plot <- ggplot(data = ctmin.pred) +
+  geom_halfeyeh(aes(y = ordervar, x = .value, fill = Location, group = Location))+
+  geom_jitter(aes(x = Ctmin, y = ordervar, shape = Tax, fill = Location),
+             data = ctmin, size = 1.5, color = "black", shape = 23, height = 0.1, stroke = 0.1) +
+  scale_color_manual(values = uaecols, labels = c("Arabian Gulf", "Gulf of Oman")) +
+  scale_fill_manual(values = alpha(uaecols, 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
+    theme_sjb() +
+  theme(axis.title.y = element_blank(),
+        axis.text.y = element_blank(), 
+        axis.ticks.y = element_blank(),
+        legend.position = "top") +
+  guides(fill = guide_legend(nrow = 1),
+         shape = guide_legend(nrow = 1)) +
+  xlab("Critical thermal minimum (º Celsius)") +
+  scale_x_continuous(limits = c(10,15.5), breaks = seq(10,15.5,1))
+
+# check plot
+ctmin.pred.plot
+
+# now combine max and min plots along the temperature range
+ctlegend<-g_legend(ctmin.pred.plot)
+
+####Fig. 3a,b####
+ctplots <- gbm::grid.arrange( ctlegend, gridExtra::arrangeGrob(ctmin.pred.plot + theme(legend.position="none"),
+                         ctmax.pred.plot + theme(legend.position="none"),
+                         nrow=1),
+            nrow=2, heights=c(1, 12))
+# save figure 3 (muted)
+# ggsave("Plots/Fig3_MS.pdf", plot = ctplots, width = 10, height = 10)
+```
+
+
 
 ```{r SIZE: E. ventermaculis and C. anomalus}
 size.strs <- read.csv(file = "Data/UAE_cryptosize_comb.csv")
@@ -646,261 +1068,15 @@ event_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summ
 
 ```
 
-```{r PHYSIOLOGY: CTmax and CTmin}
-# ct max and ctmin
-ctmax <- ctmax %>%
-    mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
-                              Tax == "ECSEPULC" ~ 5,
-                              Tax == "ENNEVENT" ~ 4,
-                              Tax == "HETEVULG" ~ 3,
-                              Tax == "EVIOGUTT" ~ 2,
-                              TRUE ~ 1),
-           taxloc = factor(interaction(Tax, Location)))
+Then, we sought to investigate dietary preferences of species and compare diets of species in the Arabian Gulf and Gulf of Oman. To do so, we used gut content DNA metabarcoding. We removed whole guts of individuals across six species, with three species sampled from both locations. We used two primers (COI and 23S) to investigate use of animal and algal prey, respectively. We applied network theory to examine the structure of dietary interactions across all sampled individuals. Chunk uses the datasets: guts_meta, coi_seqs, and 23sseqs
 
-sum(table(ctmax$taxloc))
-
-maxmod <- brm(Ctmax ~ taxloc, data = ctmax,  control = list(adapt_delta = 0.995, max_treedepth = 18));beep(sound = "coin")
-summary(maxmod)
-plot(maxmod)
-ctmax.pred <- ctmax %>%
-  data_grid(taxloc) %>%  
-  add_fitted_draws(maxmod, n = 10000) %>%
-  separate(taxloc, c("Tax", "Location"), remove = F) %>%
-  mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
-                              Tax == "ECSEPULC" ~ 5,
-                              Tax == "ENNEVENT" ~ 4,
-                              Tax == "HETEVULG" ~ 3,
-                              Tax == "EVIOGUTT" ~ 2,
-                              TRUE ~ 1))
-
-library(emmeans)
-warp_em <- emmeans (maxmod,  ~ taxloc)
-cont <- contrast(warp_em, "tukey")
-cont
-ctmax_means <- ctmax %>%
-  group_by(Location, Tax) %>%
-  summarize(meantol = mean(Ctmax), sdtol = sd(Ctmax), setol = sdtol/sqrt(n()))
-
-ctmax.pred.plot <- ggplot(data = ctmax.pred) +
-  geom_halfeyeh(aes(y = ordervar, x = .value, fill = Location, group = Location))+
-  geom_jitter(aes(x = Ctmax, y = ordervar, shape = Tax, fill = Location),
-             data = ctmax, size = 1.5, color = "black", shape = 23, height = 0.1, stroke = 0.1) +
-  scale_color_manual(values = uaecols, labels = c("Arabian Gulf", "Gulf of Oman")) +
-  scale_fill_manual(values = alpha(uaecols, 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
-  scale_shape_manual(values = c(8, 21:25)) +
-    theme_sjb() +
-  theme(axis.title.y = element_blank(),
-        axis.text.y = element_blank(), 
-        axis.ticks.y = element_blank(),
-        legend.position = "top") +
-  guides(fill = guide_legend(nrow = 1),
-         shape = guide_legend(nrow = 1)) +
-  xlab("Critical thermal maximum (º Celsius)") +
-  scale_x_continuous(limits = c(35,40), breaks = seq(35,40,1))
-  
-ctmax.pred.plot
-
-
-
-
-####ctmin
-
-ctmin <- ctmin %>%
-    mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
-                              Tax == "ECSEPULC" ~ 5,
-                              Tax == "ENNEVENT" ~ 4,
-                              Tax == "HETEVULG" ~ 3,
-                              Tax == "EVIOGUTT" ~ 2,
-                              TRUE ~ 1),
-           taxloc = factor(interaction(Tax, Location)))
-
-
-
-ctmin_means <- ctmin %>%
-  group_by(Location, Tax) %>%
-  summarize(meantol = mean(Ctmin), sdtol = sd(Ctmin), setol = sdtol/sqrt(n()))
-
-sum(table(ctmin$taxloc))
-
-minmod <- brm(Ctmin ~ taxloc, data = ctmin,  control = list(adapt_delta = 0.995, max_treedepth = 18), iter = 5000);beep(sound = "coin")
-summary(minmod)
-
-warp_em_min <- emmeans (minmod,  ~ taxloc)
-cont <- contrast(warp_em_min, "tukey")
-cont
-
-ctmin.pred <- ctmin %>%
-  data_grid(taxloc)%>%  
-  add_fitted_draws(minmod, n = 10000) %>%
-  separate(taxloc, c("Tax", "Location"), remove = F) %>%
-  mutate(ordervar = case_when(Tax == "CORYANOM" ~ 6,
-                              Tax == "ECSEPULC" ~ 5,
-                              Tax == "ENNEVENT" ~ 4,
-                              Tax == "HETEVULG" ~ 3,
-                              Tax == "EVIOGUTT" ~ 2,
-                              TRUE ~ 1))
-
-ctmin.pred.plot <- ggplot(data = ctmin.pred) +
-  geom_halfeyeh(aes(y = ordervar, x = .value, fill = Location, group = Location))+
-  geom_jitter(aes(x = Ctmin, y = ordervar, shape = Tax, fill = Location),
-             data = ctmin, size = 1.5, color = "black", shape = 23, height = 0.1, stroke = 0.1) +
-  scale_color_manual(values = uaecols, labels = c("Arabian Gulf", "Gulf of Oman")) +
-  scale_fill_manual(values = alpha(uaecols, 0.9), labels = c("Arabian Gulf", "Gulf of Oman")) +
-    theme_sjb() +
-  theme(axis.title.y = element_blank(),
-        axis.text.y = element_blank(), 
-        axis.ticks.y = element_blank(),
-        legend.position = "top") +
-  guides(fill = guide_legend(nrow = 1),
-         shape = guide_legend(nrow = 1)) +
-  xlab("Critical thermal minimum (º Celsius)") +
-  scale_x_continuous(limits = c(10,15.5), breaks = seq(10,15.5,1))
-  
-ctmin.pred.plot
-
-#function for legend
-g_legend<-function(a.gplot){
-  tmp <- ggplot_gtable(ggplot_build(a.gplot))
-  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
-  legend <- tmp$grobs[[leg]]
-  return(legend)}
-
-mylegend<-g_legend(ctmin.pred.plot)
-
-ctplots <- gbm::grid.arrange( mylegend, gridExtra::arrangeGrob(ctmin.pred.plot + theme(legend.position="none"),
-                         ctmax.pred.plot + theme(legend.position="none"),
-                         nrow=1),
-            nrow=2, heights=c(1, 12))
-
-ggsave("Plots/Fig3_MS.pdf", plot = ctplots, width = 10, height = 10)
-```
-
-```{r}
-# # map of study region
-# 
-# ####FIGURE 1B####
-# library(ggmap)
-# 
-# world <- map_data("world")
-# world_sub <- subset(world, world$long >= 50 & world$long <= 60 & world$lat >= 20 & world$lat <= 30)
-# 
-# country_names <- world_sub %>% group_by(region) %>% summarize(lat = mean(lat), long = mean(long))
-# 
-# UAEcoord <- comms[c(2,3,20,21)]
-# UAEcoord_unique <- unique(UAEcoord)
-# 
-# middle.east <- ggplot() +
-#   geom_map(data = world_sub, map = world, aes(x = long, y = lat, map_id = region), fill = "grey69", color = "grey46", lwd = 0.1) +
-#   geom_point(data = UAEcoord_unique, aes(x = long, y = Lat, color = Location), size = 3, alpha = 1) +
-#   xlab("Longitude") + ylab("Latitude") +
-#   # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
-#   # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
-#   # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
-#   annotate("text", label = "United Arab Emirates", x = 54, y = 23.5, size = 3, colour = "black") +
-#   scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
-#   theme_bw() + theme(axis.title = element_text(size=10),
-#                      axis.text.x = element_text(
-#                        size = 10),
-#                      axis.text.y = element_text(size = 10),
-#                      legend.text=element_text(size=10),
-#                      legend.title = element_text(size = 10, face = "bold"),
-#                      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-#                      legend.position = c(0.5, 0.9),
-#                      legend.direction = "horizontal",
-#                      legend.background = element_rect(fill="white", color = "black", size=0.2))
-# 
-# middle.east
-# ggsave("middle_east.pdf", plot = middle.east, width = 6, height = 5, useDingbats=FALSE)
-# 
-# UAElarge <- subset(world, world$long >= -10 & world$long <= 120 & world$lat >= 0 & world$lat <= 70)
-# 
-# middle.east.large <- ggplot() +
-#   geom_map(data = UAElarge, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
-#   xlab("Longitude") + ylab("Latitude") +
-#   # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
-#   # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
-#   # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
-#   scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
-#   theme_bw() + theme(axis.title = element_text(size=10),
-#                      axis.text.x = element_text(
-#                        size = 10),
-#                      axis.text.y = element_text(size = 10),
-#                      legend.text=element_text(size=10),
-#                      legend.title = element_text(size = 10, face = "bold"),
-#                      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-#                      legend.position = c(0.5, 0.9),
-#                      legend.direction = "horizontal",
-#                      legend.background = element_rect(fill="white", color = "black", size=0.2))
-# 
-# middle.east.large
-# ggsave("middle_east_large.pdf", plot = middle.east.large, width = 6, height = 4, useDingbats=FALSE)
-# 
-# 
-# UAEmid <- subset(world, world$long >= 30 & world$long <= 80 & world$lat >= 10 & world$lat <= 40)
-# 
-# middle.east.mid <- ggplot() +
-#   geom_map(data = UAEmid, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
-#   xlab("Longitude") + ylab("Latitude") +
-#   # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
-#   # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
-#   # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
-#   scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
-#   theme_bw() + theme(axis.title = element_text(size=10),
-#                      axis.text.x = element_text(
-#                        size = 10),
-#                      axis.text.y = element_text(size = 10),
-#                      legend.text=element_text(size=10),
-#                      legend.title = element_text(size = 10, face = "bold"),
-#                      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-#                      legend.position = c(0.5, 0.9),
-#                      legend.direction = "horizontal",
-#                      legend.background = element_rect(fill="white", color = "black", size=0.2))
-# 
-# middle.east.mid
-# ggsave("middle_east_large.pdf", plot = middle.east.large, width = 6, height = 4, useDingbats=FALSE)
-# 
-# america <- subset(world, world$region == "United States of America" & world$region == "Canada")
-# 
-# middle.east.mid <- ggplot() +
-#   geom_map(data = UAEmid, map = world, aes(x = long, y = lat, map_id = region), fill = "grey92", color = "grey46", lwd = 0.1) +
-#   xlab("Longitude") + ylab("Latitude") +
-#   # scale_x_continuous(limits = c(-180, 180), breaks = seq(-180,180, 30)) +
-#   # scale_y_continuous(limits = c(-60, 75), breaks = seq(-60, 75, 15)) +
-#   # geom_hline(yintercept = 0, lty = 2, led = 0.1, color = "grey") +
-#   scale_color_manual(name = "Location", values = c("#00B0F0", "#ed68fc")) +
-#   theme_bw() + theme(axis.title = element_text(size=10),
-#                      axis.text.x = element_text(
-#                        size = 10),
-#                      axis.text.y = element_text(size = 10),
-#                      legend.text=element_text(size=10),
-#                      legend.title = element_text(size = 10, face = "bold"),
-#                      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-#                      legend.position = c(0.5, 0.9),
-#                      legend.direction = "horizontal",
-#                      legend.background = element_rect(fill="white", color = "black", size=0.2))
-# 
-# middle.east.mid
-```
-
-```{r DIET METABARCODING: NMDS PLOTS}
-### gut content metabarcoding data
-
-guts.meta <- read.csv(file = "Data/UAE_Metabarcoding.csv")
-coi.seqs <- read.csv(file = "Data/UAE_COI.csv") %>%
-  dplyr::select(-c(UAE18862.1, UAE18400.1)) %>%
-  filter(!species %in% c("Coryogalops anomolus", 
-                         "Neopomacentrus miryae", 
-                         "Ecsenius pulcher", 
-                         "Belonidae sp. BOLD:AAE0217", 
-                         "Eviota guttata", 
-                         "Etheostoma flabellare", 
-                         "Homo sapiens", 
-                         "Butis gymnopomus",
-                         "Dinematichthys iluocoeteoides",
-                         "Oncorhynchus nerka"))
-
+```{r DIET METABARCODING: NETWORK ANALYSES}
+#####COI Primers#####
+####1. Data wrangling####
 #create vector for column names 
 cnames <- as.character(coi.seqs$ID)
+
+# combine guts_meta and coi_seqs datasets and transform to wide format where each OTU (operational taxonomic unit) is a separate column
 coi.sub <- coi.seqs[c(19:104)]%>%
   #grab columns of fish gut specimens
   rownames_to_column %>% 
@@ -912,1009 +1088,24 @@ coi.sub <- coi.seqs[c(19:104)]%>%
   mutate(rowsum = rowSums(.[4:546])) %>%
   filter(rowsum >= 1)
 
+# sample size of individuals across species and locations
 samplesize <- coi.sub %>%
   dplyr::select(ID.match, Location, Tax) %>%
   group_by(Location, Tax) %>%
   tally()
 
-coi.sub.tax <- coi.sub %>%
-  filter(Tax %in% c("ENNEVENT", "CORYANOM", "ECSEPULC"))
-
-# coi.rra <- coi.sub.tax %>%
-#   select(-c(Location, Tax)) %>%
-#   gather(variable, value, -ID.match) %>%
-#   group_by(ID.match) %>% 
-#   mutate(percentage = value/sum(value)) %>% 
-#   select(-value) %>% 
-#   spread(variable, percentage)
-
-
-
-coi.pa <- coi.sub.tax %>%
+# turn data into a presence-absence dataset, where sequence reads are replaced with 1 = present, 0 = absent
+coi.pa.taxloc <- coi.sub %>%
   select(-c(ID.match, Location, Tax)) %>%
   mutate_all(funs(case_when(. > 0 ~ 1,
                        TRUE ~ 0))) %>%
-  add_column(ID.match = coi.sub.tax$ID.match) %>%
+  add_column(ID.match = coi.sub$ID.match) %>%
   select(ID.match, everything())
 
-### run mds
-coi_mds <- metaMDS(coi.pa[-1], k = 3, trymax = 1000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
-coi_mds
+# get metadata for just the species present in coi.sub
+meta.coi.all <- coi.sub[c(1:3)]
 
-###get values and plot in ggplot
-coi.scores <- as.tibble(coi_mds$points)
-coi.scores$tax <- coi.sub.tax$Tax
-coi.scores$location <- coi.sub.tax$Location
-coi.scores$ID.match <- coi.sub.tax$ID.match
-
-coi.scores1 <- coi.scores %>%
-  unite("taxloc", c(tax, location), remove = F)
-
-###do permanova
-coi.pa.perm <- adonis(coi.pa[-1] ~ location * tax, data = coi.scores1)
-coi.pa.perm
-
-
-###do simper
-coi.pa.sim <- as.list(simper(coi.pa[-1], coi.scores1$taxloc))
-simsum <- summary(coi.pa.sim)
-top3<-lapply(simsum, `[`,1:3,)
-otunames <- ldply(lapply(top3, rownames)) %>%
-  gather("comparison", "ID", V1, V2, V3) %>%
-  arrange(.id)
-
-top3long <- plyr::ldply(top3, data.frame) %>%
-  arrange(.id) %>%
-  select(.id) %>%
-  add_column(ID = otunames$ID)
-
-OTUcoords <- as.data.frame(coi_mds$species) %>%
-  add_column(ID = rownames(.))
-
-OTUtax <- coi.seqs[c(1:10)]
-
-top3coords <- top3long %>%
-  left_join(OTUcoords, by = "ID") %>%
-  left_join(OTUtax, by = "ID") %>%
-  mutate(taxID = case_when(pident >= 97 ~ paste(phylum, class, order, species, sep = " | "),
-                           pident >= 95 ~ paste(phylum, class, order, sep = " | "),
-                           pident >= 85 ~ paste(phylum, class, sep = " | "),
-                           pident >= 75 ~ paste(phylum),
-                           pident < 75 ~ "Unidentified")) %>%
-  mutate(oMDS1 = 0,
-         oMDS2 = 0) %>%
-  select(-.id) %>%
-  unique(.)
-
-# 4 is Arthropoda | Insecta (Tantytarsus)
-# 6 is also Arthropoda | Insecta (Tantytarsus)
-# 12 is also Arthropoda | Insecta (Tantytarsus)
-###create convex hulls function
-convex_hull <- function(coi.scores1) coi.scores1[chull(coi.scores1$MDS1, coi.scores1$MDS2),] 
-
-###run convex hulls on habitats
-fish_hulls <- ddply(coi.scores1, "taxloc", convex_hull)
-
-# ### set colors
-taxloccols <- c("olivedrab4", "olivedrab2", "cyan4", "cyan2", "darkorchid4", "darkorchid2")
-
-###plot mds results
-# plot one species name
-mds.pa.coi.loc <- ggplot(coi.scores1, aes(x = MDS1, y = MDS2)) +
-  #overlay convex hulls
-  geom_polygon(data = fish_hulls, aes(x = MDS1, y = MDS2,
-                                         color = taxloc,
-                                         group = taxloc), fill = "grey69",
-               alpha = 0.1, lty = 1, lwd = 0.1) +
-  # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
-  #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
-  #overlay point
-  geom_point(size = 2, aes(color = taxloc, group = taxloc, shape = location)) +
-  theme_bw() + theme(panel.grid.major = element_blank(), 
-                     panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=10),
-                     axis.text.x = element_text(size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.position = "none") +
-  scale_y_continuous(limits = c(-1.4,1.1), breaks = seq(-1,1,0.5)) +
-  scale_x_continuous(limits = c(-1.1,1.6), breaks = seq(-1,1,0.5)) +
-  scale_color_manual(values = taxloccols) +
-  scale_fill_manual(values = taxloccols)
-
-mds.pa.coi.loc
-
-mds.top3.coi.loc <- ggplot(top3coords, aes(x = MDS1, y = MDS2)) +
-  geom_segment(data = top3coords, mapping = aes(xend = oMDS1, yend = oMDS2), lwd = 0.2, lty = 2) +
-  geom_point(size = 3, shape = 18) +
-    geom_label_repel(aes(label = taxID), size = 2) +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                     panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=10),
-                     axis.text.x = element_text(size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.position = "none") +
-    scale_y_continuous(limits = c(-1.4,1.1), breaks = seq(-1,1,0.5)) +
-  scale_x_continuous(limits = c(-1.1,1.6), breaks = seq(-1,1,0.5)) 
-mds.top3.coi.loc
-
-mds.coi.loc.vec <- ggarrange(mds.pa.coi.loc, mds.top3.coi.loc, ncol = 1, nrow = 2)
-
-ggsave("Plots/mds.pa.coi.loc.pdf", mds.coi.loc.vec, width = 7, height = 10, useDingbats = FALSE)
-
-### bring in other taxa
-coi.sub.taxloc <- coi.sub
-
-coi.rra <- coi.sub.taxloc %>%
-   select(-c(Location, Tax)) %>%
-   gather(variable, value, -ID.match) %>%
-   group_by(ID.match) %>% 
-   mutate(percentage = value/sum(value)) %>% 
-   select(-value) %>% 
-   spread(variable, percentage)
-
-
-
-coi.pa.taxloc <- coi.sub.taxloc %>%
-  select(-c(ID.match, Location, Tax)) %>%
-  mutate_all(funs(case_when(. > 0 ~ 1,
-                       TRUE ~ 0))) %>%
-  add_column(ID.match = coi.sub.taxloc$ID.match) %>%
-  select(ID.match, everything())
-
-### run mds
-coi.mds.taxloc <- metaMDS(coi.pa.taxloc[-1], k = 3, trymax = 1000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
-coi.mds.taxloc
-
-###get values and plot in ggplot
-coi.scores.taxloc <- as.tibble(coi.mds.taxloc$points)
-coi.scores.taxloc$tax <- coi.sub.taxloc$Tax
-coi.scores.taxloc$location <- coi.sub.taxloc$Location
-coi.scores.taxloc$ID.match <- coi.sub.taxloc$ID.match
-
-coi.scores.taxloc1 <- coi.scores.taxloc %>%
-  unite("taxloc", c(tax, location), remove = F)
-
-
-###do permanova
-coi.pa.perm.taxloc <- adonis(coi.pa.taxloc[-1] ~ location * tax, data = coi.scores.taxloc1)
-coi.pa.perm.taxloc
-
-###do simper
-coi.pa.sim.taxloc <- as.list(simper(coi.pa.taxloc[-1], coi.scores.taxloc1$taxloc))
-simsum.taxloc <- summary(coi.pa.sim.taxloc)
-top3.taxloc<-lapply(simsum.taxloc, `[`,1:3,)
-otunames <- ldply(lapply(top3.taxloc, rownames)) %>%
-  gather("comparison", "ID", V1, V2, V3) %>%
-  arrange(.id)
-
-top3long.taxloc <- plyr::ldply(top3.taxloc, data.frame) %>%
-  arrange(.id) %>%
-  select(.id) %>%
-  add_column(ID = otunames$ID)
-
-OTUcoords.taxloc <- as.data.frame(coi.mds.taxloc$species) %>%
-  add_column(ID = rownames(.))
-
-OTUtax <- coi.seqs[c(1:10)]
-
-top3coords.taxloc <- top3long %>%
-  left_join(OTUcoords.taxloc, by = "ID") %>%
-  left_join(OTUtax, by = "ID") %>%
-  mutate(taxID = case_when(pident >= 97 ~ paste(phylum, class, order, species, sep = " | "),
-                           pident >= 95 ~ paste(phylum, class, order, sep = " | "),
-                           pident >= 85 ~ paste(phylum, class, sep = " | "),
-                           pident >= 75 ~ paste(phylum),
-                           pident < 75 ~ "Unidentified")) %>%
-  mutate(oMDS1 = 0,
-         oMDS2 = 0) %>%
-  select(-.id) %>%
-  unique(.) %>%
-  replace_na(list(taxID = "Chordata | Actinpterygii | Blenniiformes | Salarias fasciatus"))
-#7 is arthropoda tantytarsus again
-#12 is Salarias fasciatus
-
-###create convex hulls function
-convex_hull <- function(coi.scores.taxloc1) coi.scores.taxloc1[chull(coi.scores.taxloc1$MDS1, coi.scores.taxloc1$MDS2),] 
-
-###run convex hulls on habitats
-fish.hulls.taxloc <- ddply(coi.scores.taxloc1, "taxloc", convex_hull)
-
-# ### set colors
-taxcols <- c("gold2", "olivedrab4", "olivedrab2", "cyan4", "cyan2", "darkorchid4", "darkorchid2", "lightpink1", "royalblue2")
-
-###plot mds results
-# plot one species name
-mds.pa.coi.taxloc <- ggplot(coi.scores.taxloc1, aes(x = MDS1, y = MDS2)) +
-  #overlay convex hulls
-  geom_polygon(data = fish.hulls.taxloc, aes(x = MDS1, y = MDS2,
-                                         color = taxloc,
-                                         group = taxloc), fill = "grey69",
-               alpha = 0.1, lty = 1, lwd = 0.1) +
-  # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
-  #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
-  #overlay point
-  geom_point(size = 2, aes(color = taxloc, group = taxloc, shape = location)) +
-  theme_bw() + theme(panel.grid.major = element_blank(), 
-                     panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=10),
-                     axis.text.x = element_text(size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.position = "none")+
-  scale_y_continuous(limits = c(-1.4,1.3), breaks = seq(-1,1,0.5)) +
-  scale_x_continuous(limits = c(-1.1,1.6), breaks = seq(-1,1,0.5)) +
-  scale_color_manual(values = taxcols) +
-  scale_fill_manual(values = taxcols)
-
-mds.pa.coi.taxloc
-
-mds.top3.coi.taxloc <- ggplot(top3coords.taxloc, aes(x = MDS1, y = MDS2)) +
-  geom_segment(mapping = aes(xend = oMDS1, yend = oMDS2), lwd = 0.2, lty = 2) +
-  geom_point(size = 3, shape = 18) +
-    geom_label_repel(aes(label = taxID), size = 2) +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                     panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=10),
-                     axis.text.x = element_text(size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.position = "none") +
-  scale_y_continuous(limits = c(-1.4,1.3), breaks = seq(-1,1,0.5)) +
-  scale_x_continuous(limits = c(-1.1,1.6), breaks = seq(-1,1,0.5)) 
-mds.top3.coi.taxloc
-
-mds.coi.taxloc.vec <- ggarrange(mds.pa.coi.taxloc, mds.top3.coi.taxloc, ncol = 1, nrow = 2)
-
-ggsave("mds.pa.coi.taxloc.pdf", mds.coi.loc.vec, width = 10, height = 8, useDingbats = FALSE)
-# 
-# ### do taxa in Gulf of Oman only
-# coi.sub.tax <- coi.sub %>%
-#     filter(Location == "GoO")
-# 
-# # coi.rra <- coi.sub.tax %>%
-# #   select(-c(Location, Tax)) %>%
-# #   gather(variable, value, -ID.match) %>%
-# #   group_by(ID.match) %>% 
-# #   mutate(percentage = value/sum(value)) %>% 
-# #   select(-value) %>% 
-# #   spread(variable, percentage)
-# 
-# coi.pa.tax <- coi.sub.tax %>%
-#   select(-c(ID.match, Location, Tax)) %>%
-#   mutate_all(funs(case_when(. > 0 ~ 1,
-#                        TRUE ~ 0))) %>%
-#   add_column(ID.match = coi.sub.tax$ID.match) %>%
-#   select(ID.match, everything())
-# 
-# ### run mds
-# coi.mds.tax <- metaMDS(coi.pa.tax[-1], k = 3, trymax = 2000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
-# coi.mds.tax
-# 
-# ###get values and plot in ggplot
-# coi.scores.tax <- as.tibble(coi.mds.tax$points)
-# coi.scores.tax$tax <- coi.sub.tax$Tax
-# coi.scores.tax$location <- coi.sub.tax$Location
-# coi.scores.tax$ID.match <- coi.sub.tax$ID.match
-# 
-# coi.scores.tax1 <- coi.scores.tax %>%
-#   unite("taxloc", c(tax, location), remove = F)
-# 
-# 
-# ###create convex hulls function
-# convex_hull <- function(coi.scores.tax1) coi.scores.tax1[chull(coi.scores.tax1$MDS1, coi.scores.tax1$MDS2),] 
-# 
-# ###run convex hulls on habitats
-# fish.hulls.tax <- ddply(coi.scores.tax, "tax", convex_hull)
-# 
-# # ### set colors
-# taxonlycols <- c("gold2", "olivedrab2", "cyan2", "darkorchid2", "lightpink1", "royalblue2")
-# 
-# ###plot mds results
-# # plot one species name
-# mds.pa.coi.tax <- ggplot(coi.scores.tax1, aes(x = MDS1, y = MDS2)) +
-#   #overlay convex hulls
-#   geom_polygon(data = fish.hulls.tax, aes(x = MDS1, y = MDS2,
-#                                          color = tax,
-#                                          group = tax), fill = "grey69",
-#                alpha = 0.1, lty = 1, lwd = 0.1) +
-#   # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
-#   #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
-#   #overlay point
-#   geom_point(size = 2, aes(color = tax, group = tax), shape = 17) +
-#   theme_bw() + theme(panel.grid.major = element_blank(), 
-#                      panel.grid.minor = element_blank(),
-#                      axis.title = element_text(size=14),
-#                      axis.text.x = element_text(size = 14),
-#                      axis.text.y = element_text(size = 14),
-#                      legend.position = "none") +
-#   #   scale_y_continuous(limits = c(-1.2,1.2), breaks = seq(-1,1,0.5)) +
-#   # scale_x_continuous(limits = c(-1.2,1.4), breaks = seq(-1,1,0.5)) +
-#   scale_color_manual(values = taxonlycols) +
-#   scale_fill_manual(values = taxonlycols)
-
-mds.coi.tax.vec <- ggarrange(mds.pa.coi.tax, mds.top3.coi.taxloc, ncol = 1, nrow = 2)
-
-ggsave("mds.coi.tax.vec", mds.pa.coi.tax, width = 7, height = 10, useDingbats = FALSE)
-
-coi.plots <- ggarrange(mds.coi.loc.vec, mds.coi.taxloc.vec, nrow = 1, ncol = 2)
-coi.plots
-ggsave("mds.coi.vec.pdf", coi.plots, width = 12, height = 12, useDingbats = FALSE)
-
-
-
-###23S data
-seqs23s <- read.csv(file = "Data/UAE_23S.csv") %>%
-  select(-c(UAE18862.1, UAE18400.1))
-#create vector for column names 
-cnames <- as.character(seqs23s$ESV)
-sub23s <- seqs23s %>%
-  #grab columns of fish gut specimens
-  select(., contains("UAE18")) %>%
-  rownames_to_column %>% 
-  gather(var, value, -rowname) %>% 
-  spread(rowname, value) %>%
-  set_colnames(c("ID.match", cnames)) %>%
-  join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
-  select(ID.match, Location, Tax, everything()) %>% 
-  mutate(rowsum = rowSums(.[4:3009]))
-
-sub23s.loc <- sub23s %>%
-  filter(Tax %in% c("ENNEVENT", "CORYANOM", "ECSEPULC"))
-
-# coi.rra <- coi.sub.tax %>%
-#   select(-c(Location, Tax)) %>%
-#   gather(variable, value, -ID.match) %>%
-#   group_by(ID.match) %>% 
-#   mutate(percentage = value/sum(value)) %>% 
-#   select(-value) %>% 
-#   spread(variable, percentage)
-# 
-
-
-pa23s.loc <- sub23s.loc %>%
-  select(-c(ID.match, Location, Tax)) %>%
-  mutate_all(funs(case_when(. > 0 ~ 1,
-                       TRUE ~ 0))) %>%
-  add_column(ID.match = sub23s.loc$ID.match) %>%
-  select(ID.match, everything())
-
-### run mds
-mds23s.loc <- metaMDS(pa23s.loc[-1], k = 3, trymax = 1000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
-
-###get values and plot in ggplot
-scores23s.loc <- as.tibble(mds23s.loc$points)
-scores23s.loc$tax <- sub23s.loc$Tax
-scores23s.loc$location <- sub23s.loc$Location
-scores23s.loc$ID.match <- sub23s.loc$ID.match
-
-scores23s.loc1 <- scores23s.loc %>%
-  unite("taxloc", c(tax, location), remove = F)
-
-
-###do permanova
-perm.23.loc <- adonis(pa23s.loc[-1] ~ location * tax, data = scores23s.loc1)
-perm.23.loc
-
-###do simper
-pa.sim.23s.loc <- as.list(simper(pa23s.loc[-1], scores23s.loc1$taxloc))
-simsum.23sloc <- summary(pa.sim.23s.loc)
-top3.23s.loc<-lapply(simsum.23sloc, `[`,1,)
-esvnames <- ldply(lapply(top3.23s.loc, rownames)) %>%
-  gather("comparison", "ESV", V1) %>%
-  arrange(.id)
-
-top3long.23s.loc <- plyr::ldply(top3.23s.loc, data.frame) %>%
-  arrange(.id) %>%
-  select(.id) %>%
-  add_column(ESV = esvnames$ESV)
-
-ESVcoords.23s.loc <- as.data.frame(mds23s.loc$species) %>%
-  add_column(ESV = rownames(.))
-
-ESVtax <- seqs23s[c(1:9)]
-
-top3coords.23s.loc <- top3long.23s.loc %>%
-  left_join(ESVcoords.23s.loc, by = "ESV") %>%
-  left_join(ESVtax, by = "ESV") %>%
-  mutate(taxID = case_when(id >= 97 ~ paste(Phylum, Order, Species, sep = " | "),
-                           id >= 95 ~ paste(Phylum, Order, sep = " | "),
-                           id >= 85 ~ paste(Phylum, Order, sep = " | "),
-                           id >= 75 ~ paste(Phylum),
-                           id < 75 ~ "Unidentified")) %>%
-  mutate(oMDS1 = 0,
-         oMDS2 = 0) %>%
-  select(-.id) %>%
-  distinct(taxID, MDS1, MDS2, oMDS1, oMDS2) 
-
-
-###create convex hulls function
-convex_hull <- function(scores23s.loc1) scores23s.loc1[chull(scores23s.loc1$MDS1, scores23s.loc1$MDS2),] 
-
-###run convex hulls on habitats
-fish.hulls23s.loc <- ddply(scores23s.loc1, "taxloc", convex_hull)
-
-# ### set colors
-taxloccols <- c("olivedrab4", "olivedrab2", "cyan4", "cyan2", "darkorchid4", "darkorchid2")
-
-###plot mds results
-# plot one species name
-mds.pa.23s.loc <- ggplot(scores23s.loc1, aes(x = MDS1, y = MDS2)) +
-  #overlay convex hulls
-  geom_polygon(data = fish.hulls23s.loc, aes(x = MDS1, y = MDS2,
-                                         color = taxloc,
-                                         group = taxloc), fill = "grey69",
-               alpha = 0.1, lty = 1, lwd = 0.1) +
-  # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
-  #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
-  #overlay point
-  geom_point(size = 2, aes(color = taxloc, group = taxloc, shape = location)) +
-  theme_bw() + theme(panel.grid.major = element_blank(), 
-                     panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=10),
-                     axis.text.x = element_text(size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.position = "none") +
-  scale_y_continuous(limits = c(-2.5,1.2), breaks = seq(-2,1,0.5)) +
-  scale_x_continuous(limits = c(-1.8,1.2), breaks = seq(-2,1,0.5)) +
-  scale_color_manual(values = taxloccols) +
-  scale_fill_manual(values = taxloccols)
-
-mds.pa.23s.loc
-ggsave("mds.pa.23s.loc.pdf", mds.pa.23s.loc, width = 10, height = 8, useDingbats = FALSE)
-
-mds.top3.23s.loc <- ggplot(top3coords.23s.loc, aes(x = MDS1, y = MDS2)) +
-  geom_segment(mapping = aes(xend = oMDS1, yend = oMDS2), lwd = 0.2, lty = 2) +
-  geom_point(size = 3, shape = 18) +
-    geom_label_repel(aes(label = taxID), size = 1.5, segment.size = 0.2) +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                     panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=10),
-                     axis.text.x = element_text(size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.position = "none") + 
-  scale_y_continuous(limits = c(-2.5,1.2), breaks = seq(-2,1,0.5)) +
-  scale_x_continuous(limits = c(-1.8,1.2), breaks = seq(-2,1,0.5))
-mds.top3.23s.loc
-
-mds.23s.loc.vec <- ggarrange(mds.pa.23s.loc, mds.top3.23s.loc, ncol = 1, nrow = 2)
-mds.23s.loc.vec
-ggsave("mds.23s.loc.vec.pdf", mds.23s.loc.vec, width = 7, height = 10, useDingbats = FALSE)
-
-
-
-
-### try bringing in the other taxa
-sub23s.taxloc <- sub23s 
-
-pa23s.taxloc <- sub23s.taxloc %>%
-  select(-c(ID.match, Location, Tax)) %>%
-  mutate_all(funs(case_when(. > 0 ~ 1,
-                       TRUE ~ 0))) %>%
-  add_column(ID.match = sub23s.taxloc$ID.match) %>%
-  select(ID.match, everything())
-
-### run mds
-mds23s.taxloc <- metaMDS(pa23s.taxloc[-1], k = 3, trymax = 1000, distance = "jaccard", engine = "monoMDS", autotransform =TRUE)
-
-###get values and plot in ggplot
-scores23s.taxloc <- as.tibble(mds23s.taxloc$points)
-scores23s.taxloc$tax <- sub23s.taxloc$Tax
-scores23s.taxloc$location <- sub23s.taxloc$Location
-scores23s.taxloc$ID.match <- sub23s.taxloc$ID.match
-
-scores23s1.taxloc <- scores23s.taxloc %>%
-   unite("taxloc", c(tax, location), remove = F)
-
-###do permanova
-perm.23.taxloc <- adonis(pa23s.taxloc[-1] ~ location * tax, data = scores23s1.taxloc)
-perm.23.taxloc
-
-###do simper
-pa.sim.23s.taxloc <- as.list(simper(pa23s.taxloc[-1], scores23s1.taxloc$taxloc))
-simsum.23staxloc <- summary(pa.sim.23s.taxloc)
-top3.23s.taxloc<-lapply(simsum.23staxloc, `[`,1,)
-esvnames <- ldply(lapply(top3.23s.taxloc, rownames)) %>%
-  gather("comparison", "ESV", V1) %>%
-  arrange(.id)
-
-top3long.23s.taxloc <- plyr::ldply(top3.23s.taxloc, data.frame) %>%
-  arrange(.id) %>%
-  select(.id) %>%
-  add_column(ESV = esvnames$ESV)
-
-ESVcoords.23s.taxloc <- as.data.frame(mds23s.taxloc$species) %>%
-  add_column(ESV = rownames(.))
-
-ESVtax <- seqs23s[c(1:9)]
-
-top3coords.23s.taxloc <- top3long.23s.taxloc %>%
-  left_join(ESVcoords.23s.taxloc, by = "ESV") %>%
-  left_join(ESVtax, by = "ESV") %>%
-  mutate(taxID = case_when(id >= 97 ~ paste(Phylum, Order, Species, sep = " | "),
-                           id >= 95 ~ paste(Phylum, Order, sep = " | "),
-                           id >= 85 ~ paste(Phylum, Order, sep = " | "),
-                           id >= 75 ~ paste(Phylum),
-                           id < 75 ~ "Unidentified")) %>%
-  mutate(oMDS1 = 0,
-         oMDS2 = 0) %>%
-  select(-.id) %>%
-  distinct(taxID, MDS1, MDS2, oMDS1, oMDS2) 
-
-
-
-###create convex hulls function
-convex_hull <- function(scores23s1.taxloc) scores23s1.taxloc[chull(scores23s1.taxloc$MDS1, scores23s1.taxloc$MDS2),] 
-
-###run convex hulls on habitats
-fish.hulls23s.taxloc <- ddply(scores23s1.taxloc, "taxloc", convex_hull)
-
-# ### set colors
-taxcols <- c("gold2", "olivedrab4", "olivedrab2", "cyan4", "cyan2", "darkorchid4", "darkorchid2", "lightpink1", "royalblue2")
-
-###plot mds results
-# plot one species name
-mds.pa.23s.taxloc <- ggplot(scores23s1.taxloc, aes(x = MDS1, y = MDS2)) +
-  #overlay convex hulls
-  geom_polygon(data = fish.hulls23s.taxloc, aes(x = MDS1, y = MDS2,
-                                         color = taxloc,
-                                         group = taxloc), fill = "grey69",
-               alpha = 0.1, lty = 1, lwd = 0.1) +
-  # stat_ellipse(data = fish.scores1, aes(x = MDS1, y = MDS2, group = species),
-  #              alpha = 1, lty = 1, lwd = 0.3, level = 0.50) +
-  #overlay point
-  geom_point(size = 2, aes(color = taxloc, group = taxloc, shape = location)) +
-  theme_bw() + theme(panel.grid.major = element_blank(), 
-                     panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=10),
-                     axis.text.x = element_text(size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.position = "none") +
-  scale_y_continuous(limits = c(-2.1,1.3), breaks = seq(-2,1,0.5)) +
-  scale_x_continuous(limits = c(-2.3,1), breaks = seq(-2,1,0.5)) +
-  scale_color_manual(values = taxcols) +
-  scale_fill_manual(values = taxcols)
-
-mds.pa.23s.taxloc
-ggsave("mds.pa.23s.taxloc.pdf", mds.pa.23s.taxloc, width = 10, height = 8, useDingbats = FALSE)
-
-
-mds.top3.23s.taxloc <- ggplot(top3coords.23s.taxloc, aes(x = MDS1, y = MDS2)) +
-  geom_segment(mapping = aes(xend = oMDS1, yend = oMDS2), lwd = 0.2, lty = 2) +
-  geom_point(size = 3, shape = 18) +
-    geom_label_repel(aes(label = taxID), size = 1.5, segment.size = 0.2) +
-    theme_bw() + theme(panel.grid.major = element_blank(), 
-                     panel.grid.minor = element_blank(),
-                     axis.title = element_text(size=10),
-                     axis.text.x = element_text(size = 10),
-                     axis.text.y = element_text(size = 10),
-                     legend.position = "none") +
-  scale_y_continuous(limits = c(-2.1,1.3), breaks = seq(-2,1,0.5)) +
-  scale_x_continuous(limits = c(-2.3,1), breaks = seq(-2,1,0.5)) 
-mds.top3.23s.taxloc
-
-mds.23s.taxloc.vec <- ggarrange(mds.pa.23s.taxloc, mds.top3.23s.taxloc, ncol = 1, nrow = 2)
-mds.23s.taxloc.vec
-ggsave("mds.23s.loc.vec.pdf", mds.23s.loc.vec, width = 7, height = 10, useDingbats = FALSE)
-
-plots23s <- ggarrange(mds.23s.loc.vec, mds.23s.taxloc.vec, nrow = 1, ncol = 2)
-
-ggsave("plots23svectors.pdf", plots23s, width = 12, height = 12, useDingbats = FALSE)
-```
-
-```{r METABARCODING: NETWORKS}
-
-#######################
-#######################
-#######################network
-meta.coi <- coi.sub.taxloc[c(1:3)]
-network.coi <- coi.pa %>%
-  select(-rowsum) %>%
-  pivot_longer(cols = 2:547, names_to = "ID") %>%
-  filter(value > 0) %>%
-  left_join(meta.coi[1:3], by = "ID.match") %>%
-  group_by(ID, Tax, Location) %>%
-  summarize(value = sum(value)) %>%
-  mutate(LocTax = interaction(Location, Tax)) %>%
-  select(ID, LocTax, everything())
-
-cfstat.coi <- graph_from_data_frame(network.coi)
-
-###get network community characteristics
-ed.coi <- edge_density(cfstat.coi, loops=F)
-
-net.sym.coi <- as.undirected(cfstat.coi, mode= "collapse", edge.attr.comb=list(weight="sum", "ignore"))
-
-ceb.coi <- cluster_edge_betweenness(net.sym.coi) 
-memb.coi <- membership(ceb.coi)
-mod.coi <- modularity(ceb.coi)
-
-###permutations
-
-mod.perm.coi <- data.frame(ed_perm = numeric(length = 99), mod_perm = numeric(length = 99), 
-                           AG.CORYANOM = numeric(length = 99), AG.ECSEPULC = numeric(length = 99), AG.ENNEVENT = numeric(length = 99), 
-                           GoO.CORYANOM = numeric(length = 99), GoO.ECSEPULC = numeric(length = 99), GoO.ENNEVENT = numeric(length = 99))
-
-for (i in 1:99) {
-  print(i)
-
-  
-meta.coi.random <- meta.coi %>%
-  select(Tax, Location) %>%
-  sample_frac(1L) %>%
-  add_column(ID.match = meta.coi$ID.match) %>%
-  select(ID.match, Location, Tax)
-
-network.coi.rand <- coi.pa %>%
-  select(-rowsum) %>%
-  pivot_longer(cols = 2:547, names_to = "ID") %>%
-  filter(value > 0) %>%
-  left_join(meta.coi.random[1:3], by = "ID.match") %>%
-  group_by(ID, Location, Tax) %>%
-  summarize(value = sum(value)) %>% 
-  mutate(LocTax = interaction(Location, Tax)) %>%
-  select(ID, LocTax, everything())
-
-cfstat.coi.rand <- graph_from_data_frame(network.coi.rand)
-
-###get network community characteristics
-ed.coi.rand <- edge_density(cfstat.coi.rand, loops=F)
-
-net.sym.coi.rand <- as.undirected(cfstat.coi.rand, mode= "collapse", edge.attr.comb=list(weight="sum", "ignore"))
-
-ceb.coi.rand <- cluster_edge_betweenness(net.sym.coi.rand) 
-memb.coi.rand <- membership(ceb.coi.rand)
-mod.coi.rand <- modularity(ceb.coi.rand)
-
-df <- memb.coi.rand[513:518]
-df1 <- df[order(names(df))]
-
-mod.perm.coi[i,1] <- ed.coi.rand
-mod.perm.coi[i,2] <- mod.coi.rand
-mod.perm.coi[i,3] <- df1[1]
-mod.perm.coi[i,4] <- df1[2]
-mod.perm.coi[i,5] <- df1[3]
-mod.perm.coi[i,6] <- df1[4]
-mod.perm.coi[i,7] <- df1[5]
-mod.perm.coi[i,8] <- df1[6]
-}
-
-
-
-mod.perm.comp.coi <- mod.perm.coi %>%
-  mutate(ed_emp = ed.coi,
-         mod_emp = mod.coi,
-         ed_comp = case_when(ed_perm < ed_emp ~ 1,
-                             TRUE ~ 0),
-         mod_comp = case_when(mod_perm > mod_emp ~ 1,
-                              TRUE ~ 0))
-
-mod.perm.comp.coi
-
-groupings <- mod.perm.comp.coi %>%
-  pivot_longer(cols = c(3:8), names_to = "cluster", values_to = "group") %>%
-  separate(cluster, c("Location", "Species"), remove = F) %>%
-  mutate(iteration = rep(1:99, each = 6)) +
-  group_by
-
-group.plot <- ggplot(groupings, aes(x = iteration, y = group, color = Location, shape =  Species)) +
-  geom_jitter(width = 0, height = 0.2) +
-    theme_sjb() +
-  theme(axis.text.y = element_blank(), 
-        axis.ticks.y = element_blank(),
-        axis.title.y = element_blank(),
-        legend.position = "top",
-        legend.box = "vertical") +
-  scale_color_manual(values = uaecols)
-group.plot
-
-ggsave("Plots/FigSupp1Groups.pdf", group.plot, width = 6, height = 6, useDingbats = F)
-
-share.color <- network.coi %>%
-  ungroup() %>%
-  select(ID, Location) %>%
-  distinct() 
-
-shared <- share.color %>%
-  mutate(indicator = 1) %>%
-  group_by(ID) %>%
-  summarize(shared = sum(indicator)) %>%
-  mutate(sharedornot = case_when(shared == 1 ~ "unique",
-                                 TRUE ~ "Shared")) %>%
-  right_join(share.color) %>%
-  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
-                                 TRUE ~ paste(sharedornot)))
-  
-network.coi.colored <- network.coi %>%
-  left_join(shared, by = "ID") %>%
-  mutate(taxloc = interaction(Tax, Location.y))
-
-uaecols.network <- c(uaecols, "grey69")
-
-network.plot.coi <- ggplot(data = network.coi.colored) +
-  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = taxloc, colour = share.color, shape = Tax, alpha = 0.5),
-  lwd=3, labelon = F, ealpha = 0.3, arrowsize = 0.1, linewidth = 0.2, 
-  vjust = 0.5, hjust = 0.5) +
-  # labelcolour = cfnet2$lcolour) +
-  theme_net() +
-  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
-  scale_color_manual(values = uaecols.network) +
-  scale_shape_manual(values = c(15:17)) +
-  theme(legend.position = "right")
-network.plot.coi
-
-ggsave("Plots/nwtcoi_both.pdf", plot = network.plot.coi, width = 8, height = 8, useDingbats=FALSE)
-
-
-share.color <- network.coi.rand %>%
-  select(ID, Location) %>%
-  distinct() 
-
-shared <- share.color %>%
-  mutate(indicator = 1) %>%
-  group_by(ID) %>%
-  summarize(shared = sum(indicator)) %>%
-  mutate(sharedornot = case_when(shared == 1 ~ "unique",
-                                 TRUE ~ "Shared")) %>%
-  right_join(share.color) %>%
-  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
-                                 TRUE ~ paste(sharedornot)))
-  
-network.coi.colored.rand <- network.coi.rand %>%
-  left_join(shared, by = "ID") %>%
-  mutate(taxloc = interaction(Tax, Location.y))
-
-uaecols.network <- c(uaecols, "grey69")
-
-network.plot.coi.rand <- ggplot(data = network.coi.colored.rand) +
-  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = taxloc, 
-                                                   colour = share.color, fill = share.color, shape = Tax),
-  lwd=3, labelon = F, ealpha = 0.3, arrowsize = 0.1, linewidth = 0.2, 
-  vjust = 0.5, hjust = 0.5) +
-  # labelcolour = cfnet2$lcolour) +
-  theme_net() +
-  scale_color_manual(values = uaecols.network) +
-  scale_shape_manual(values = c(15:17)) +
-  theme(legend.position = "right")
-network.plot.coi.rand
-
-
-############
-meta.23s <- sub23s.loc[c(1:3)] %>%
-  filter(Tax %in% c("ECSEPULC", "ENNEVENT", "CORYANOM"))
-network.23s <- pa23s.loc %>%
-  select(-rowsum) %>%
-  pivot_longer(cols = 2:3007, names_to = "ID") %>%
-  filter(value > 0) %>%
-  left_join(meta.23s[1:3], by = "ID.match") %>%
-  group_by(ID, Location, Tax) %>%
-  summarize(value = sum(value)) %>%
-  mutate(LocTax = interaction(Location, Tax)) %>%
-  select(ID, LocTax, everything())
-
-
-share.color.23s <- network.23s %>%
-  select(ID, Location) %>%
-  distinct() 
-
-shared.23s <- share.color.23s %>%
-  mutate(indicator = 1) %>%
-  group_by(ID) %>%
-  summarize(shared = sum(indicator)) %>%
-  mutate(sharedornot = case_when(shared == 1 ~ "unique",
-                                 TRUE ~ "Shared")) %>%
-  right_join(share.color.23s) %>%
-  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
-                                 TRUE ~ paste(sharedornot)))
-  
-network.23s.colored <- network.23s %>%
-  left_join(shared.23s, by = "ID") %>%
-  mutate(taxloc = interaction(Tax, Location.y))
-
-uaecols.network <- c(uaecols, "grey46")
-
-network.plot.23s <- ggplot(data = network.23s.colored) +
-  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = taxloc, colour = share.color, shape = Tax, alpha = 0.3),
-  lwd=3, labelon = F, ealpha = 0.1, arrowsize = 0.1, linewidth = 0.2, 
-  vjust = 0.5, hjust = 0.5, repel = TRUE) +
-  # labelcolour = cfnet2$lcolour) +
-  theme_net() +
-  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
-  scale_color_manual(values = uaecols.network) +
-  scale_shape_manual(values = c(15:17)) +
-  theme(legend.position = "right")
-network.plot.23s
-
-ggsave("Plots/nwt23s_both.pdf", plot = network.plot.23s, width = 8, height = 8, useDingbats=FALSE)
-
-networklegend<-g_legend(network.plot.23s)
-
-networkplots <- gbm::grid.arrange(networklegend, gridExtra::arrangeGrob(network.plot.coi + theme(legend.position="none"),
-                         network.plot.23s + theme(legend.position="none"),
-                         nrow=2),
-            nrow=2, heights=c(1, 12))
-
-ggsave("Plots/Fig5_MS.pdf", plot = networkplots, width = 6, height = 8, useDingbats=FALSE)
-
-###########################
-####### GoO only ##########
-meta.coi.goo <- coi.sub.taxloc[c(1:3)]
-network.coi.goo <- coi.pa.taxloc %>%
-  select(-rowsum) %>%
-  pivot_longer(cols = 2:547, names_to = "ID") %>%
-  filter(value > 0) %>%
-  left_join(meta.coi.goo[1:3], by = "ID.match") %>%
-  group_by(ID, Location, Tax) %>%
-  summarize(value = sum(value)) %>%
-  filter(Location == "GoO") %>%
-  ungroup() %>%
-  select(-Location)
-
-#network analysis
-cfstat.coi.goo <- graph_from_data_frame(network.coi.goo)
-
-###get network community characteristics
-ed.coi.goo <- edge_density(cfstat.coi.goo, loops=F)
-
-net.sym.coi.goo <- as.undirected(cfstat.coi.goo, mode= "collapse", edge.attr.comb=list(weight="sum", "ignore"))
-
-ceb.coi.goo <- cluster_edge_betweenness(net.sym.coi.goo) 
-memb.coi.goo <- membership(ceb.coi.goo)
-modul.goo.coi <- modularity(ceb.coi.goo)
-
-
-
-table(network.coi.goo$ID, network.coi.goo$Tax)
-
-share.color <- network.coi.goo %>%
-  ungroup() %>%
-  select(ID, Tax) %>%
-  distinct() 
-
-shared <- share.color %>%
-  mutate(indicator = 1) %>%
-  group_by(ID) %>%
-  summarize(shared = sum(indicator)) %>%
-  mutate(sharedornot = case_when(shared == 1 ~ "unique",
-                                 TRUE ~ "Shared")) %>%
-  right_join(share.color) %>%
-  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Tax),
-                                 TRUE ~ paste(sharedornot)))
-  
-network.coi.goo.colored <- network.coi.goo %>%
-  left_join(shared, by = "ID") 
-
-goo.cols <- fish(n = 6, option = "Trimma_lantana", begin = 0.8, end = 0.2)
-uaecols.network.goo <- c(goo.cols, "grey46")
-
-network.plot.coi.goo <- ggplot(data = network.coi.goo.colored) +
-  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = Tax.x, colour = share.color, shape = sharedornot, alpha = 0.5),
-  lwd=3, labelon = F, ealpha = 0.1, arrowsize = 0.1, linewidth = 0.2, 
-  vjust = 0.5, hjust = 0.5) +
-  # labelcolour = cfnet2$lcolour) +
-  theme_net() +
-  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
-  scale_color_manual(values = uaecols.network.goo) +
-  scale_shape_manual(values = c(15:16)) +
-  theme(legend.position = "right")
-network.plot.coi.goo
-
-
-ggsave("Plots/nwtcoi_goo.pdf", plot = network.plot.coi.goo, width = 8, height = 8, useDingbats=FALSE)
-
-
-###########permutation CO
-meta.coi.goo = meta.coi %>%
-  filter(Location == "GoO") %>%
-  select(-Location) 
-
-mod.perm <- data.frame(ed_perm = numeric(length = 99), mod_perm = numeric(length = 99))
-
-for (i in 1:999) {
-  print(i)
-meta.coi.goo.random <- meta.coi.goo %>%
-  select(Tax) %>%
-  sample_frac(1L) %>%
-  add_column(ID.match = meta.coi.goo$ID.match)
-
-network.coi.goo.rand <- coi.pa.taxloc %>%
-  select(-rowsum) %>%
-  pivot_longer(cols = 2:547, names_to = "ID") %>%
-  filter(value > 0) %>%
-  right_join(meta.coi.goo.random[1:2], by = "ID.match") %>%
-  group_by(ID, Tax) %>%
-  summarize(value = sum(value))
-
-cfstat.coi.goo.rand <- graph_from_data_frame(network.coi.goo.rand)
-
-###get network community characteristics
-ed.coi.goo.rand <- edge_density(cfstat.coi.goo.rand, loops=F)
-
-net.sym.coi.goo.rand <- as.undirected(cfstat.coi.goo.rand, mode= "collapse", edge.attr.comb=list(weight="sum", "ignore"))
-
-ceb.coi.goo.rand <- cluster_edge_betweenness(net.sym.coi.goo.rand) 
-memb.coi.goo.rand <- membership(ceb.coi.goo.rand)
-modul.coi.goo.rand <- modularity(ceb.coi.goo.rand)
-
-mod.perm[i,1] <- ed.coi.goo.rand
-mod.perm[i,2] <- modul.coi.goo.rand
-}
-
-mod.perm.comp <- mod.perm %>%
-  mutate(ed_emp = ed.coi.goo,
-         mod_emp = modul.goo.coi,
-         ed_comp = case_when(ed_perm > ed_emp ~ 1,
-                             TRUE ~ 0),
-         mod_comp = case_when(mod_perm < mod_emp ~ 1,
-                              TRUE ~ 0))
-#######################################
-###########GOO 23S#####################
-#######################################
-meta.23s <- sub23s.taxloc[c(1:3)]
-network.23s.goo <- pa23s.taxloc %>%
-  select(-rowsum) %>%
-  pivot_longer(cols = 2:3007, names_to = "ID") %>%
-  filter(value > 0) %>%
-  left_join(meta.23s[1:3], by = "ID.match") %>%
-  group_by(ID, Location, Tax) %>%
-  summarize(value = sum(value))%>%
-  filter(Location == "GoO") %>%
-  ungroup() %>%
-  select(-Location)
-
-table(network.23s.goo$ID, network.23s.goo$Tax)
-
-share.color <- network.23s.goo %>%
-  ungroup() %>%
-  select(ID, Tax) %>%
-  distinct() 
-
-shared <- share.color %>%
-  mutate(indicator = 1) %>%
-  group_by(ID) %>%
-  summarize(shared = sum(indicator)) %>%
-  mutate(sharedornot = case_when(shared == 1 ~ "unique",
-                                 TRUE ~ "Shared")) %>%
-  right_join(share.color) %>%
-  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Tax),
-                                 TRUE ~ paste(sharedornot)))
-  
-network.23s.goo.colored <- network.23s.goo %>%
-  left_join(shared, by = "ID") 
-
-goo.cols <- fish(n = 6, option = "Trimma_lantana", begin = 0.8, end = 0.2)
-uaecols.network.goo <- c(goo.cols, "grey69")
-
-network.plot.23s.goo <- ggplot(data = network.23s.goo.colored) +
-  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = Tax.x, colour = share.color, shape = sharedornot, alpha = 0.3),
-  lwd=3, labelon = F, ealpha = 0.1, arrowsize = 0.1, linewidth = 0.2, 
-  vjust = 0.5, hjust = 0.5) +
-  # labelcolour = cfnet2$lcolour) +
-  theme_net() +
-  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
-  scale_color_manual(values = uaecols.network.goo) +
-  scale_shape_manual(values = c(15:16)) +
-  theme(legend.position = "right")
-network.plot.23s.goo
-
-ggsave("Plots/nwt23s_goo.pdf", plot = network.plot.23s.goo, width = 8, height = 8, useDingbats=FALSE)
-
-
-cfstat.23s.goo <- graph_from_data_frame(network.23s.goo)
-
-###get network community characteristics
-ed.23s.goo <- edge_density(cfstat.23s.goo, loops=F)
-
-net.sym.23s.goo <- as.undirected(cfstat.23s.goo, mode= "collapse", edge.attr.comb=list(weight="sum", "ignore"))
-
-ceb.23s.goo <- cluster_edge_betweenness(net.sym.23s.goo) 
-memb.23s.goo <- membership(ceb.23s.goo)
-modul.23s.goo <- modularity(ceb.23s.goo)
-memb.23s.goo[1925:1930]
-
-
-
-
-###########################
-####### GoO only ##########
-meta.coi.all <- coi.sub.taxloc[c(1:3)]
+# prepare data for plotting (to be merged back in later): creating a data frame in long format that has each interaction as a row, with information on individuals, sequences, location, and species as columns
 network.coi.all <- coi.pa.taxloc %>%
   select(-rowsum) %>%
   pivot_longer(cols = 2:547, names_to = "ID") %>%
@@ -1922,64 +1113,24 @@ network.coi.all <- coi.pa.taxloc %>%
   left_join(meta.coi.all[1:3], by = "ID.match") %>%
   group_by(ID) %>%
   mutate(total = sum(value)) %>%
-  ungroup() 
-
-
-network.coi.plot <- coi.pa.taxloc %>%
-  select(-rowsum) %>%
-  pivot_longer(cols = 2:547, names_to = "ID") %>%
-  filter(value > 0) %>%
-  left_join(meta.coi.all[1:3], by = "ID.match") %>%
-  group_by(ID) %>%
-  mutate(total = sum(value)) %>%
-  ungroup() %>%
+  ungroup()%>%
+  # remove all single OTUs in the dataset to facilitate modularity analysis
+  filter(total  > 1) %>%
   arrange(ID)
 
-
-share.color <- network.coi.plot %>%
-  ungroup() %>%
-  select(ID, Location) %>%
-  distinct() 
-
-shared <- share.color %>%
-  mutate(indicator = 1) %>%
-  group_by(ID) %>%
-  summarize(shared = sum(indicator)) %>%
-  mutate(sharedornot = case_when(shared == 1 ~ "unique",
-                                 TRUE ~ "Shared")) %>%
-  right_join(share.color) %>%
-  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
-                                 TRUE ~ paste(sharedornot)))
-  
-network.coi.plot.comb <- network.coi.plot %>%
-  left_join(shared, by = "ID") %>%
-  mutate(taxloc = interaction(Tax, Location.y))
-
-uaecols.network <- c(uaecols, "grey69")
-
-network.plot.coi <- ggplot(data = network.coi.plot.comb) +
-  geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = taxloc, colour = share.color, shape = Tax),
-  lwd=3, labelon = F, ealpha = 0.2, arrowsize = 0.1, linewidth = 0.2, 
-  vjust = 0.5, hjust = 0.5) +
-  # labelcolour = cfnet2$lcolour) +
-  theme_net() +
-  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
-  scale_color_manual(values = uaecols.network) +
-  theme(legend.position = "right")
-network.plot.coi
-
-ggsave("Plots/nwtcoi_both.pdf", plot = network.plot.coi, width = 8, height = 8, useDingbats=FALSE)
-
-#######
-########
-# run modularity
+# reshape the dataset back into wide format for the modularity analysis
 network.coi.bip <- network.coi.all %>%
   pivot_wider(id_cols = ID.match, names_from = ID, values_from = value, values_fill = list(value = 0))
 
+####2. Data analysis####
+# calculate modularity using Beckett's community detection algorithm
 mod.coi.single <- computeModules(network.coi.bip[-1], method = "Beckett", forceLPA = FALSE)
 
+# to ensure stable results (algorithm starts at a randomly chosen point, which can affect number of modules), compute meta modules from 20 iterations of the analysis
+# ATTENTION: TAKES TIME - APPROXIMATELY 3h on 2018 Mac with 2.6 GHz Intel Core i7 and 16 GB 2400 MHz DDR4.
 mod.coi <- metaComputeModules(network.coi.bip[-1], method = "Beckett", N = 20, forceLPA = FALSE)
 
+# extract modularity values and membership for each individual
 pred.modularity <- as.data.frame(mod.coi@modules[-1, -c(1,2) ]) %>%
   select(1:78) %>%
   rename_at(vars(colnames(.)), ~ network.coi.bip$ID.match) %>%
@@ -1992,22 +1143,25 @@ pred.modularity <- as.data.frame(mod.coi@modules[-1, -c(1,2) ]) %>%
   arrange(taxloc) %>%
   unite(taxloc, ID.match, col = "xval", remove = F)
 
-write.csv(pred.modularity, file = "Data/COImembership_20iter.csv")
+# write data to file to save results of the analysis (muted)
+# write.csv(pred.modularity, file = "Data/COImembership_20iter.csv")
 
-
-
-prey.mod.csv <- read.csv(file = "Data/COImembership_20iter.csv") %>%
+# load results (prey_modularity) into environment (deleting number column)
+pred.modularity <- read.csv(file = "Data/COImembership_20iter.csv") %>%
   select(-X)
 
-module.tree <- network.coi.plot %>%
-  inner_join(prey.mod.csv, by = c("ID.match", "Location", "Tax"))
+# combine with network.coi.all data created earlier
+module.tree.coi <- network.coi.all %>%
+  inner_join(pred.modularity, by = c("ID.match", "Location", "Tax"))
 
-
-share.color <- module.tree %>%
+# need to prepare helper dataset for color assignment in the network plot
+# get unique combinations of OTUs and locations
+share.color <- module.tree.coi %>%
   ungroup() %>%
   select(ID, Location) %>%
   distinct() 
 
+# assign OTUs to be either shared between locations or unique
 shared <- share.color %>%
   mutate(indicator = 1) %>%
   group_by(ID) %>%
@@ -2017,12 +1171,16 @@ shared <- share.color %>%
   right_join(share.color) %>%
   mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
                                  TRUE ~ paste(sharedornot)))
-  
-network.coi.plot.comb <- module.tree %>%
+
+# combine helper dataset with assigned module date
+network.coi.plot.comb <- module.tree.coi %>%
   left_join(shared, by = "ID") 
 
+# assign three colors: regular colors for AG and GoO plus grey for shared
 uaecols.network <- c(uaecols, "grey69")
 
+####Fig. 4a####
+# plot network with modules as nodes and colors based on uniqueness of OTUs
 network.plot.coi <- ggplot(data = network.coi.plot.comb) +
   geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = module, colour = share.color),
   lwd=3, labelon = F, ealpha = 0.2, arrowsize = 0.1, linewidth = 0.2, 
@@ -2033,12 +1191,12 @@ network.plot.coi <- ggplot(data = network.coi.plot.comb) +
   scale_color_manual(values = uaecols.network) +
   theme(legend.position = "right")
 network.plot.coi
-ggsave("Plots/module_tree.pdf", plot = network.plot.coi, width = 8, height = 8, useDingbats=FALSE)
 
+# save plot (muted)
+# ggsave("Plots/module_tree.pdf", plot = network.plot.coi, width = 8, height = 8, useDingbats=FALSE)
 
-
-helper <- pred.modularity %>%
-  arrange(ID.match, taxloc)
+# now to visualize clusters
+####Fig. 4b####
 ###visualize clusters
 moduleplot.coi <- ggplot(pred.modularity, aes(x = xval, y = as.factor(module), fill = Location, color = Location)) +
   geom_tile(color = "black", position = "identity", height = 0.75, width = 1) +
@@ -2053,10 +1211,40 @@ moduleplot.coi <- ggplot(pred.modularity, aes(x = xval, y = as.factor(module), f
   coord_fixed(ratio = 3)
 moduleplot.coi
 
-ggsave("Plots/modulplot_coi.pdf", plot = moduleplot.coi, width = 8, height = 6, useDingbats=FALSE)
+# save plot (muted)
+# ggsave("Plots/modulplot_coi.pdf", plot = moduleplot.coi, width = 8, height = 6, useDingbats=FALSE)
 
-###23s
-meta.23s.all <- sub23s.taxloc[c(1:3)]
+
+####23S Primers####
+####1. Data wrangling####
+# do the same procedure for 23S dataset
+#create vector for column names 
+cnames <- as.character(seqs23s$ESV)
+
+# turn into wide format with every ESV as column
+sub23s <- seqs23s %>%
+  #grab columns of fish gut specimens
+  select(., contains("UAE18")) %>%
+  rownames_to_column %>% 
+  gather(var, value, -rowname) %>% 
+  spread(rowname, value) %>%
+  set_colnames(c("ID.match", cnames)) %>%
+  join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
+  select(ID.match, Location, Tax, everything()) %>% 
+  mutate(rowsum = rowSums(.[4:3009]))
+
+#create presence absence dataset
+pa23s.taxloc <- sub23s %>%
+  select(-c(ID.match, Location, Tax)) %>%
+  mutate_all(funs(case_when(. > 0 ~ 1,
+                       TRUE ~ 0))) %>%
+  add_column(ID.match = sub23s$ID.match) %>%
+  select(ID.match, everything())
+
+# get first three columns of metadata
+meta.23s.all <- sub23s[c(1:3)]
+
+# create long format dataset for plotting
 network.23s.all <- pa23s.taxloc %>%
   select(-rowsum) %>%
   pivot_longer(cols = 2:3007, names_to = "ID") %>%
@@ -2067,63 +1255,23 @@ network.23s.all <- pa23s.taxloc %>%
   group_by(ID) %>%
   mutate(total = sum(value)) %>%
   ungroup() %>%
+  # remove all single ESVs to permit convergence of modularity analysis
   filter(total  > 1) %>%
   arrange(ID)
 
-length(unique(network.23s.all$ID))
-
-network.23s.plot <- pa23s.taxloc %>%
-  select(-rowsum) %>%
-  pivot_longer(cols = 2:3007, names_to = "ID") %>%
-  filter(value > 0) %>%
-  left_join(meta.23s.all[1:3], by = "ID.match") %>%
-  group_by(ID, Location, Tax) %>%
-  summarize(value = sum(value)) %>%
-  mutate(LocTax = interaction(Location, Tax)) %>%
-  select(ID, LocTax, everything())
-
-
-share.color.23s <- network.23s.plot %>%
-  select(ID, Location) %>%
-  distinct() 
-
-shared.23s <- share.color.23s %>%
-  mutate(indicator = 1) %>%
-  group_by(ID) %>%
-  summarize(shared = sum(indicator)) %>%
-  mutate(sharedornot = case_when(shared == 1 ~ "unique",
-                                 TRUE ~ "Shared")) %>%
-  right_join(share.color.23s) %>%
-  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
-                                 TRUE ~ paste(sharedornot)))
-  
-network.23s.colored <- network.23s.plot %>%
-  left_join(shared.23s, by = "ID") %>%
-  mutate(taxloc = interaction(Tax, Location.y))
-
-uaecols.network <- c(uaecols, "grey46")
-
-network.plot.23s <- ggplot(data = network.23s.colored) +
- geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = taxloc, colour = share.color, shape = Tax, alpha = 0.75),
-  lwd=3, labelon = F, ealpha = 0.1, arrowsize = 0.1, linewidth = 0.2, 
-  vjust = 0.5, hjust = 0.5) +
-  # labelcolour = cfnet2$lcolour) +
-  theme_net() +
-  # scale_colour_manual(values = c("deepskyblue", "navy", "mediumspringgreen", "green4")) +
-  scale_color_manual(values = uaecols.network) +
-  theme(legend.position = "right")
-network.plot.23s
-
-ggsave("Plots/nwt23s_both.pdf", plot = network.plot.23s, width = 8, height = 8, useDingbats=FALSE)
-
-
+# turn back into wide format for modularity analysis
 network.23s.bip <- network.23s.all %>%
   pivot_wider(id_cols = ID.match, names_from = ID, values_from = value, values_fill = list(value = 0))
 
+####2. Data analysis####
+# single module computation (cf. COI data)
 mod.23s.single <- computeModules(network.23s.bip[-1], method = "Beckett", forceLPA = FALSE)
 
+# meta modularity analysis (cf. COI data)
+# ATTENTION: TAKES TIME - APPROXIMATELY 5h on 2018 Mac with 2.6 GHz Intel Core i7 and 16 GB 2400 MHz DDR4.
 mod.23s <- metaComputeModules(network.23s.bip[-1], method = "Beckett", N = 20, forceLPA = FALSE)
 
+# prepare modularity data set from the results as before
 pred.modularity.23s <- as.data.frame(mod.23s@modules[-1, -c(1,2) ]) %>%
   select(1:86) %>%
   rename_at(vars(colnames(.)), ~ network.23s.bip$ID.match)%>%
@@ -2136,20 +1284,24 @@ pred.modularity.23s <- as.data.frame(mod.23s@modules[-1, -c(1,2) ]) %>%
   arrange(taxloc) %>%
   unite(taxloc, ID.match, col = "xval", remove = F)
 
-write.csv(pred.modularity.23s, file = "Data/23smembership_20iter.csv")
+# save data due to computation time of analysis (muted)
+# write.csv(pred.modularity.23s, file = "Data/23smembership_20iter.csv")
 
-prey.mod.23s <- read.csv(file = "Data/23smembership_20iter.csv") %>%
+# load modularity dataset back into the system
+pred.modularity.23s <- read.csv(file = "Data/23smembership_20iter.csv") %>%
   select(-X)
 
-module.tree.23s <- network.coi.plot %>%
-  inner_join(prey.mod.23s, by = c("ID.match", "Location", "Tax"))
+# combine with network dataset 
+module.tree.23s <- network.23s.all %>%
+  inner_join(pred.modularity.23s, by = c("ID.match", "Location", "Tax"))
 
-
+# create helper dataset for color assignment as before
 share.color.23s <- module.tree.23s %>%
   ungroup() %>%
   select(ID, Location) %>%
   distinct() 
 
+# as above
 shared.23s <- share.color.23s %>%
   mutate(indicator = 1) %>%
   group_by(ID) %>%
@@ -2157,14 +1309,15 @@ shared.23s <- share.color.23s %>%
   mutate(sharedornot = case_when(shared == 1 ~ "unique",
                                  TRUE ~ "Shared")) %>%
   right_join(share.color.23s) %>%
-  mutate(share.color.23s = case_when(sharedornot == "unique" ~ paste(Location),
+  mutate(share.color = case_when(sharedornot == "unique" ~ paste(Location),
                                  TRUE ~ paste(sharedornot)))
   
+# combine with modularity assignments
 network.23s.plot.comb <- module.tree.23s %>%
-  left_join(shared, by = "ID") 
+  left_join(shared.23s, by = "ID") 
 
-uaecols.network <- c(uaecols, "grey69")
-
+####Fig. 4c####
+# plot network as previously
 network.plot.23s <- ggplot(data = network.23s.plot.comb) +
   geom_net(layout.alg = "fruchtermanreingold", aes(from_id = ID, to_id = module, colour = share.color),
   lwd=3, labelon = F, ealpha = 0.2, arrowsize = 0.1, linewidth = 0.2, 
@@ -2175,10 +1328,12 @@ network.plot.23s <- ggplot(data = network.23s.plot.comb) +
   scale_color_manual(values = uaecols.network) +
   theme(legend.position = "right")
 network.plot.23s
-ggsave("Plots/module_tree_23s.pdf", plot = network.plot.23s, width = 8, height = 8, useDingbats=FALSE)
+# save plot (muted)
+# ggsave("Plots/module_tree_23s.pdf", plot = network.plot.23s, width = 8, height = 8, useDingbats=FALSE)
 
 
-###visualize clusters
+####Fig. 4d####
+# visualize modules
 moduleplot.23s <- ggplot(pred.modularity.23s, aes(x = xval, y = as.factor(module), fill = Location, color = Location)) +
   geom_tile(color = "black", position = "identity", height = 0.75, width = 1) +
   scale_fill_manual(values = uaecols) +
@@ -2192,11 +1347,16 @@ moduleplot.23s <- ggplot(pred.modularity.23s, aes(x = xval, y = as.factor(module
   coord_fixed(ratio = 3)
 moduleplot.23s
 
-ggsave("Plots/modulplot_23s.pdf", plot = moduleplot.23s, width = 8, height = 6, useDingbats=FALSE)
+#save plot (muted)
+#ggsave("Plots/modulplot_23s.pdf", plot = moduleplot.23s, width = 8, height = 6, useDingbats=FALSE)
 ```
 
-```{r OTU/ESV DIVESRITY: RAREFACTION}
-#coi otus and sequences
+We further sought to examine the richness of prey items for each species in the two locations. To do so, we performed rarefaction analyses of unique taxa vs. sequence reads, again using the DNA metabarcoding data for the two primers.
+
+```{r DIET METABARCODING: RAREFACTION}
+####COI Primers####
+####1. Data wrangling####
+# coi data: get number of OTUs and sequences for each individual
 preydiv.coi <- coi.sub %>%
   select(-rowsum) %>%
   pivot_longer(OTU_8:OTU_394, names_to = "OTUs") %>%
@@ -2207,146 +1367,8 @@ preydiv.coi <- coi.sub %>%
             nb.seq.coi = sum(value))
 preydiv.coi
 
-#23s esvs and sequences
-preydiv.23s <-   sub23s %>%
-  select(-rowsum) %>%
-  pivot_longer(ESV_000034:ESV_036113, names_to = "ESVs") %>%
-  mutate(presabs = case_when(value > 0 ~ 1,
-                              TRUE ~ 0)) %>%
-  group_by(ID.match, Location, Tax) %>%
-  summarize(nb.esv.23s = sum(presabs),
-            nb.seq.23s = sum(value))
-preydiv.23s
-
-
-
-
-# 
-# ### diatoms
-# coi.seqs.bac <- coi.seqs %>%
-#   filter(phylum == "Bacillariophyta")
-# cnames.bac <- as.character(coi.seqs.bac$ID)
-# coi.sub.bac <- coi.seqs.bac[c(19:104)]%>%
-#   #grab columns of fish gut specimens
-#   rownames_to_column %>% 
-#   gather(var, value, -rowname) %>% 
-#   spread(rowname, value) %>%
-#   set_colnames(c("ID.match", cnames.bac)) %>%
-#   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
-#   select(ID.match, Location, Tax, everything())
-# 
-# preydiv.coi.bac <- coi.sub.bac %>%
-#   pivot_longer(OTU_8:OTU_395, names_to = "OTUs") %>%
-#   mutate(presabs = case_when(value > 0 ~ 1,
-#                               TRUE ~ 0)) %>%
-#   group_by(ID.match, Location, Tax) %>%
-#   summarize(nb.otu.coi = sum(presabs),
-#             nb.seq.coi = sum(value))
-# preydiv.coi.bac
-
-# ###
-# ###23S data
-# bac.23s <- seqs23s %>%
-#   filter(Phylum == "Bacillariophyta")
-# cnames <- as.character(bac.23s$ESV)
-# sub23s.bac <- bac.23s %>%
-#   #grab columns of fish gut specimens
-#   select(., contains("UAE18")) %>%
-# #   rownames_to_column %>% 
-# #   gather(var, value, -rowname) %>% 
-# #   spread(rowname, value) %>%
-# #   set_colnames(c("ID.match", cnames)) %>%
-# #   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") 
-# # 
-# # preydiv.23s.bac <- sub23s.bac %>%
-# #   pivot_longer(ESV_005478:ESV_036113, names_to = "ESVs") %>%
-# #   mutate(presabs = case_when(value > 0 ~ 1,
-# #                               TRUE ~ 0)) %>%
-# #   group_by(ID.match, Location, Tax) %>%
-# #   summarize(nb.esv.23s = sum(presabs),
-# #             nb.seq.23s = sum(value))
-# # preydiv.23s.bac
-# # 
-# # preydiv.allprim.bac <- inner_join(preydiv.coi.bac, preydiv.23s.bac, by = c("ID.match", "Location", "Tax")) %>%
-# #   mutate(ratio_tax = nb.otu.coi/nb.esv.23s,
-# #          ratio_seq = nb.seq.coi/nb.seq.23s,
-# #          tax_unit_sum = nb.otu.coi + nb.esv.23s) %>%
-# #   group_by(Location, Tax) %>%
-# #   summarize(mean_nbotu = mean(nb.otu.coi),
-# #             mean_nbesv = mean(nb.esv.23s),
-# #             mean_nbtotal = mean(tax_unit_sum),
-# #             mean_seq_coi = mean(nb.seq.coi),
-# #             mean_seq_23s = mean(nb.seq.23s),
-# #             mean_ratio_tax = mean(ratio_tax),
-# #             mean_ratio_seq = mean(ratio_seq)) %>%
-# #   arrange(Tax)
-# # preydiv.allprim.bac
-# 
-# 
-# ####all but diatoms
-# coi.seqs.nobac <- coi.seqs %>%
-#   filter(phylum != "Bacillariophyta")
-# cnames.nobac <- as.character(coi.seqs.nobac$ID)
-# coi.sub.nobac <- coi.seqs.nobac[c(19:104)]%>%
-#   #grab columns of fish gut specimens
-#   rownames_to_column %>% 
-#   gather(var, value, -rowname) %>% 
-#   spread(rowname, value) %>%
-#   set_colnames(c("ID.match", cnames.nobac)) %>%
-#   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
-#   select(ID.match, Location, Tax, everything())
-# 
-# preydiv.coi.nobac <- coi.sub.nobac %>%
-#   pivot_longer(OTU_11:OTU_394, names_to = "OTUs") %>%
-#   mutate(presabs = case_when(value > 0 ~ 1,
-#                               TRUE ~ 0)) %>%
-#   group_by(ID.match, Location, Tax) %>%
-#   summarize(nb.otu.coi = sum(presabs),
-#             nb.seq.coi = sum(value))
-# preydiv.coi.nobac
-# 
-# ###
-# ###23S data
-# nobac.23s <- seqs23s %>%
-#   filter(Phylum != "Bacillariophyta")
-# cnames <- as.character(nobac.23s$ESV)
-# sub23s.nobac <- nobac.23s %>%
-#   #grab columns of fish gut specimens
-#   select(., contains("UAE18")) %>%
-#   rownames_to_column %>% 
-#   gather(var, value, -rowname) %>% 
-#   spread(rowname, value) %>%
-#   set_colnames(c("ID.match", cnames)) %>%
-#   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") 
-# 
-# preydiv.23s.nobac <- sub23s.nobac %>%
-#   pivot_longer(ESV_000034:ESV_036112, names_to = "ESVs") %>%
-#   mutate(presabs = case_when(value > 0 ~ 1,
-#                               TRUE ~ 0)) %>%
-#   group_by(ID.match, Location, Tax) %>%
-#   summarize(nb.esv.23s = sum(presabs),
-#             nb.seq.23s = sum(value))
-# preydiv.23s.nobac
-# 
-# preydiv.allprim.nobac <- inner_join(preydiv.coi.nobac, preydiv.23s.nobac, by = c("ID.match", "Location", "Tax")) %>%
-#   mutate(ratio_tax = nb.otu.coi/nb.esv.23s,
-#          ratio_seq = nb.seq.coi/nb.seq.23s,
-#          tax_unit_sum = nb.otu.coi + nb.esv.23s) %>%
-#   group_by(Location, Tax) %>%
-#   summarize(mean_nbotu = mean(nb.otu.coi),
-#             mean_nbesv = mean(nb.esv.23s),
-#             mean_nbtotal = mean(tax_unit_sum),
-#             mean_seq_coi = mean(nb.seq.coi),
-#             mean_seq_23s = mean(nb.seq.23s),
-#             mean_ratio_tax = mean(ratio_tax),
-#             mean_ratio_seq = mean(ratio_seq)) %>%
-#   arrange(Tax)
-# preydiv.allprim.nobac
-
-
-###################rarefaction
-
-coi.meta <- coi.seqs %>%
+# create  new metadata helper
+coi.meta.rare <- coi.seqs %>%
   select(ID, UAE18005.1:UAE18867.1) %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
   pivot_wider(names_from = "ID", values_from = "value") %>%
@@ -2357,6 +1379,7 @@ coi.meta <- coi.seqs %>%
   select(ID, Location, Tax) %>%
   filter(ID != "NA_NA")
 
+# turn rarefaction data into wide format
 coi.rare <- coi.seqs %>%
   select(ID, UAE18005.1:UAE18867.1) %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
@@ -2371,29 +1394,32 @@ coi.rare <- coi.seqs %>%
   pivot_wider(names_from = "ID", values_from = "value") %>%
   select(-NA_NA)
 
-
+# need rownanems to work with lists so quick workaround to get rownames in data frame
 coi.rare1 <- as.data.frame(coi.rare)
 rownames(coi.rare1) <- coi.rare1$name
 coi.seqs.nt <- coi.rare1[-1]
 
-
+# turn into lists
 coi.seqs.list = as.data.frame(t(coi.seqs.nt))
 str(coi.seqs.list)
-
 coi.list2 <- as.data.frame(coi.seqs.list)
 
 
-# split dataframe into list, with each ARMS as an element
+# split dataframe into lists, with each species/population as an element
 coi.list.split <- split(coi.list2, rownames(coi.list2))
+
+# transpose each element
 coi.list.t <- lapply(coi.list.split, t)
 
-# rarefaction curves by samples
-rarefactioncoi <- iNEXT(coi.list.t, q=0, datatype="abundance", size=NULL, endpoint=max(colSums(coi.rare[-1])), knots=50, se=TRUE, conf=0.95, nboot=100);beep(sound = 7)
-rarefactioncoi
+####2. Data analysis####
+# compute rarefaction curves by species/populations using iNEXT package
+rarefactioncoi <- iNEXT(coi.list.t, q=0, datatype="abundance", size=NULL, endpoint=max(colSums(coi.rare[-1])), knots=50, se=TRUE, conf=0.95, nboot=100)
 
-
+# get data out of the ggplot wrapper to allow for custoimized plotting
 rare <- fortify(rarefactioncoi, type=1) %>%
   rename(ID = site)
+
+# create dataset for plotting
 rare.meta <- rare %>%
   inner_join(coi.meta) %>%
   mutate(taxonlong = case_when(Tax == "ANTEADEN" ~ "Antennablennius adenensis",
@@ -2402,12 +1428,13 @@ rare.meta <- rare %>%
                                Tax == "ENNEVENT" ~ "Enneapterygius ventermaculus",
                                Tax == "EVIOGUTT" ~ "Eviota guttata",
                                Tax == "HETEVULG" ~ "Hetereleotris vulgaris"))
-head(rare.meta)
 
+# get point and line elements for inter- and extrapolation
 rare.point <-rare.meta[which(rare.meta$method=="observed"),]
 rare.line <-rare.meta[which(rare.meta$method!="observed"),]
 rare.line$method <- factor(rare.line$method, c("interpolated", "extrapolated"), c("interpolation", "extrapolation"))
 
+####Fig. S1a####
 rarefactionplot.coi <- ggplot(rare.meta, aes(x=x, y=y, color=Location)) +
 geom_line(aes(linetype=method), lwd=0.5, data=rare.line) + geom_ribbon(aes(ymin=y.lwr, ymax=y.upr,fill=Location, color=NULL), alpha=0.2) + labs(x="Number of sequences", y="Number of OTUs") +
   theme_bw() + theme(plot.title = element_text(size = 8),
@@ -2421,12 +1448,27 @@ geom_line(aes(linetype=method), lwd=0.5, data=rare.line) + geom_ribbon(aes(ymin=
   ggtitle("a") +
   theme(strip.text = element_text(face = "italic"),
         plot.title = element_text(size = 14, face = "bold"))
-  
+
+# show plot
 rarefactionplot.coi
 
 
-###23S
-meta23s <- seqs23s %>%
+####23S Primers####
+####1. Data wrangling####
+# same as previously
+# 23s data: same for esvs and sequences
+preydiv.23s <-   sub23s %>%
+  select(-rowsum) %>%
+  pivot_longer(ESV_000034:ESV_036113, names_to = "ESVs") %>%
+  mutate(presabs = case_when(value > 0 ~ 1,
+                              TRUE ~ 0)) %>%
+  group_by(ID.match, Location, Tax) %>%
+  summarize(nb.esv.23s = sum(presabs),
+            nb.seq.23s = sum(value))
+preydiv.23s
+
+# new metadata helper
+meta23s.rare <- seqs23s %>%
   select(ESV, UAE18005.1:UAE18867.1) %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
   pivot_wider(names_from = "ESV", values_from = "value") %>%
@@ -2436,6 +1478,7 @@ meta23s <- seqs23s %>%
   select(-nb.esv.23s, -nb.seq.23s) %>%
   select(ID, Location, Tax) 
 
+# same as above
 rare23s <- seqs23s %>%
   select(ESV, UAE18005.1:UAE18867.1) %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
@@ -2449,29 +1492,25 @@ rare23s <- seqs23s %>%
   pivot_longer(cols = 2:3007) %>%
   pivot_wider(names_from = "ID", values_from = "value")
 
-max(colSums(rare23s[-1]))
-
-
+# same workaround for rownames
 rare123s <- as.data.frame(rare23s)
 rownames(rare123s) <- rare123s$name
 seqs23snt <- rare123s[-1]
 
-
+# list wrangling
 seqs23slist = as.data.frame(t(seqs23snt))
 str(seqs23slist)
-
 seqs23slist2 <- as.data.frame(seqs23slist)
 
-
-# split dataframe into list, with each ARMS as an element
+# split dataframe into lists
 list23ssplit <- split(seqs23slist, rownames(seqs23slist))
 list23st <- lapply(list23ssplit, t)
 
-# rarefaction curves by samples
-rarefaction23s <- iNEXT(list23st, q=0, datatype="abundance", size=NULL, endpoint=max(colSums(rare23s[-1])), knots=50, se=TRUE, conf=0.95, nboot=100);beep(sound = 8)
-rarefaction23s
+####2. Data analysis####
+# rarefaction curves
+rarefaction23s <- iNEXT(list23st, q=0, datatype="abundance", size=NULL, endpoint=max(colSums(rare23s[-1])), knots=50, se=TRUE, conf=0.95, nboot=100)
 
-
+# get data out of ggplot wrapper again
 rarified23s <- fortify(rarefaction23s, type=1) %>%
   rename(ID = site)
 rare23smeta <- rarified23s %>%
@@ -2482,12 +1521,13 @@ rare23smeta <- rarified23s %>%
                                Tax == "ENNEVENT" ~ "Enneapterygius ventermaculus",
                                Tax == "EVIOGUTT" ~ "Eviota guttata",
                                Tax == "HETEVULG" ~ "Hetereleotris vulgaris"))
-head(rare23smeta)
 
+# add helpers for points and lines
 rare23spoint <-rare23smeta[which(rare23smeta$method=="observed"),]
 rare23sline <-rare23smeta[which(rare23smeta$method!="observed"),]
 rare23sline$method <- factor(rare23sline$method, c("interpolated", "extrapolated"), c("interpolation", "extrapolation"))
 
+####Fig. S1b####
 rarefactionplot23s <- ggplot(rare23smeta, aes(x=x, y=y, color=Location)) + 
 geom_line(aes(linetype=method), lwd=0.5, data=rare23sline) + 
   geom_ribbon(aes(ymin=y.lwr, ymax=y.upr,fill=Location, color=NULL), alpha=0.2) + labs(x="Number of sequences", y="Number of ESVs") +
@@ -2504,21 +1544,23 @@ geom_line(aes(linetype=method), lwd=0.5, data=rare23sline) +
         plot.title = element_text(size = 14, face = "bold"))
 rarefactionplot23s
 
+# get legend
 rarelegend<-g_legend(rarefactionplot23s)
 
+# combine rarefaction plots
 rarefactionplots <- gbm::grid.arrange(rarelegend, gridExtra::arrangeGrob(rarefactionplot.coi + theme(legend.position="none"),
                          rarefactionplot23s + theme(legend.position="none"),
                          nrow=2),
             nrow=2, heights=c(1, 12))
 
+####Fig. S1####
 FigS1 <- gridExtra::arrangeGrob(rarefactionplot.coi + theme(legend.position="none"),
                                rarefactionplot23s + theme(legend.position="none"), 
                                nrow = 2)
 
-ggsave("Plots/FigS1_MS.png", plot = FigS1, width = 8, height = 10)
+# save plot (muted)
+# ggsave("Plots/FigS1_MS.png", plot = FigS1, width = 8, height = 10)
 ```
-
-
 
 
 ```{r GROWTH MODELING}
@@ -2698,120 +1740,4 @@ ggsave("Plots/temperature_plots.png", temp_plots, width = 8, height = 3)
 # x = as.data.frame(table(growth.species$LinfTL, growth.species$sstmean)) %>%
 #   filter(Freq > 0) %>%
 #   arrange(Var1, Var2)
-```
-
-```{r BENTHIC: COMPOSITION}
-table(benthcomm$category)
-
-benth.tidy <- benthcomm %>%
-  mutate(category_tidy = case_when(category == "livecoral_encrusting" ~ "livecoral_other",
-                                   category == "livecoral_foliose" ~ "livecoral_other",
-                                   category == "livecoral_massive" ~ "livecoral_other",
-                                   TRUE ~ as.character(category))) %>%
-  filter(category != "unidentifiable") %>% 
-  group_by(category) %>%
-  mutate(total_cat = n()) %>%
-  ungroup() %>%
-  filter(total_cat >= 3) %>%
-  group_by(location, site, sitename, category_tidy) %>%
-  summarize(total = n()) %>%
-  ungroup() %>%
-  group_by(location, site, sitename) %>%
-  mutate(category_percent = total/sum(total)) %>%
-  dplyr::select(-total) %>%
-  pivot_wider(names_from = category_tidy, values_from = category_percent,
-    values_fill = list(category_percent = 0))
-
-
-benth.cc <- benth.tidy %>%
-  dplyr::select(location, site, sitename, livecoral_other, livecoral_branching) %>%
-  mutate(total_cc = livecoral_other+livecoral_branching)
-
-###run mds
-benth.mds <- metaMDS(benth.tidy[-c(1:4)], metric = "Bray", trymax = 1000)
-benth.mds
-stressplot(benth.mds)
-
-perm.benth = adonis(benth.tidy[-c(1:4)] ~ location, benth.tidy, distance = "Bray", permutations = 999)
-perm.benth
-###get values and plot in ggplot
-site.scores.benth <- as.tibble(scores(benth.mds)) %>%
-  mutate(location = benth.tidy$location,
-         site = benth.tidy$site,
-         sitename = benth.tidy$sitename) %>% 
-  inner_join(benth.tidy) %>%
-  mutate(ordervar = case_when(site == "Dhabiya" ~ 1,
-                              site == "RasGhanada" ~ 2,
-                              site == "Saadiyat" ~ 3,
-                              site == "Dibba" ~ 4,
-                              site == "Sharm" ~ 5,
-                              site == "Snoopy" ~ 6)) %>%
-  mutate(Coral_cover = livecoral_other + livecoral_branching)
-
-
-mds.points.benth <- as.data.frame(scores(benth.mds, "species")) %>%
-  add_column(category = rownames(.))
-
-point.plot.benth <- ggplot(mds.points.benth) +
-  theme_sjb() +
-  geom_segment(aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
-               arrow = arrow(length = unit(0.3, "cm")), color = "grey69",
-               inherit.aes = F) +
-  theme(legend.position = "top") +
-  geom_text_repel(aes(x=NMDS1, NMDS2, label=category), size=3, inherit.aes = F) +
-  scale_y_continuous(limits = c(-0.75, 0.75), breaks = seq(-0.75, 0.75, 0.25)) +
-  scale_x_continuous(limits = c(-1.2, 1.2)) +
-  xlab("NMDS1") +
-  ylab("NMDS2")
-point.plot.benth
-###create convex hulls function
-convex_hull <- function(site.scores.benth) site.scores.benth[chull(site.scores.benth$NMDS1, site.scores.benth$NMDS2),] 
-
-###run convex hulls on habitats
-site_hulls <- ddply(site.scores.benth, "location", convex_hull)
-
-
-###create vector with habitat names in center of convex hulls
-site_centers <- site_hulls %>% group_by(location) %>% summarize(NMDS1 = mean(NMDS1), NMDS2 = mean(NMDS2))
-
-###plot mds results
-# plot one species name
-comp.plot.benth <- ggplot(site.scores.benth, aes(x = NMDS1, y = NMDS2)) +
-  #overlay convex hulls
-  #overlay points
-  geom_point(aes(color = location, group = location, fill = location, size = Coral_cover,
-                             shape = reorder(site, sort(as.numeric(ordervar))))) +
-    geom_polygon(data = site_hulls, aes(x = NMDS1, y = NMDS2, 
-                                         fill = location,
-                                         group = location),
-               alpha = 0.4, lty = 1, lwd = 0.1, color = "black") +
-    geom_segment(data = mds.points.benth, aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
-               arrow = arrow(length = unit(0.2, "cm")), color = "black", lwd = 0.25,
-               inherit.aes = F) +
-  theme(legend.position = "top") +
-  geom_text_repel(data = mds.points.benth, aes(x=NMDS1, NMDS2, label=category), size=4, inherit.aes = F) +
-  theme_bw()+
-  theme(legend.position = "top",
-        legend.title.align = 0,
-        legend.box = "horizontal") +
-  scale_color_manual(values = uaecols) +
-  scale_fill_manual(values = uaecols) +
-  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-    guides(fill = guide_legend(nrow = 1),
-         shape = guide_legend(nrow = 1)) +
-    scale_y_continuous(limits = c(-0.75, 0.75), breaks = seq(-0.75, 0.75, 0.25)) +
-  scale_x_continuous(limits = c(-1.2, 1.2)) +
-  xlab("NMDS1") +
-  ylab("NMDS2")
-
-comp.plot.benth
-
-
-#run GLM with abundance data and offset for surface area sampled
-cc.model <- brm(logit_scaled(total_cc) ~ location + (1|site), 
-                            data = benth.cc, control = list(adapt_delta = 0.999, max_treedepth = 15))
-summary(cc.model)
-
-ggsave("Plots/BenthicPlot.pdf", plot = comp.plot.benth, width = 8, height = 8, useDingbats = FALSE)
-
 ```
