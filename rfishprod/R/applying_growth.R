@@ -39,7 +39,7 @@ applyVBGF <- function (Lmeas, t = 1, Lmax, Kmax, t0, t0lowbound = -0.5,  silent 
 	tt <- (1 / Kmax) * log ((Lmax - L0) / ((1 - Li) * Lmax)) + (t / 365)
 	Lgr <- Lmax * (1 - exp (-Kmax * (tt - t0)))
 
-	ctrgr (Lgr, Lmeas, silent = silent)	
+	ctrgr (Lmeas = Lmeas, Lgr = Lgr, silent = silent)	
 	
 	return (Lgr)
 	

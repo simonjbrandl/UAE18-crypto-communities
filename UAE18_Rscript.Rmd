@@ -44,6 +44,9 @@ library(ncdf4)
 library(raster)
 library(rvest)     
 library(stringr)
+
+# also loading rfishprod package (Morais, in review) from source
+devtools::load_all('rfishprod')
 ```
 
 The study consists of three main datasets: community structure of cryptobenthics, individual temperature tolerances of a subset of species, and the results of gut content DNA metabarcoding using two distinct primers (COI and 23S). Descriptions of the datasets are provided below.
@@ -87,10 +90,14 @@ coi.seqs <- read.csv(file = "Data/UAE_COI.csv") %>%
 
 # 7. seqs23s = Dataset of sequences obtained from gut-content DNA metabarcoding with 23S primers. Same setup as COI dataset. Same two individuals removed due to lack of prey items sequences. No self-hit removal necessary.
 seqs23s <- read.csv(file = "Data/UAE_23S.csv") %>%
-  select(-c(UAE18862.1, UAE18400.1))
+  dplyr::select(-c(UAE18862.1, UAE18400.1))
 
 # 8. size.strs = Dataset of individuals (subset of comms) that contains only sizes an species affiliations for the three species commonly encountered in both locations.
 size.strs <- read.csv(file = "Data/UAE_cryptosize_comb.csv")
+
+# 9. crypto_traits and lenwei: Datasets to allow growth modeling of individuals for system wide productivity estimates. crypto_traits is the community structure dataset from the clove-oil stations, with a set of traits (MaxSizeTL, Diet,	Schooling,	Movimentation,	sstmean) matched to each individual fish based on species-level data. lenwei provides family-level length-weight relationships from FishBase for all families in the dataset.
+crypto_traits <- read.csv ('Data/traitlist_allfish.csv')
+lenwei <- read.csv ('Data/famlevparamsSJB.csv')
 
 # set color scheme for all plots using fishualize package
 uaecols <- fish(n = 2, option = "Trimma_lantana", end = 0.3)
@@ -268,7 +275,7 @@ summary(diversity.model)
 div.pred <- comm_means %>%
   ungroup() %>%
   group_by(Location) %>%
-  select(Location, Site) %>%
+  dplyr::select(Location, Site) %>%
   add_predicted_draws(diversity.model, n = 1000) %>%
   mutate(pred.diversity = exp(.prediction))
 
@@ -325,7 +332,7 @@ summary(abundance.model)
 abu.pred <- comm_means %>%
   ungroup() %>%
   group_by(Location) %>%
-  select(Location, Site) %>%
+  dplyr::select(Location, Site) %>%
   add_predicted_draws(abundance.model, n = 1000) %>%
   mutate(pred.density = exp(.prediction))
 
@@ -381,7 +388,7 @@ summary(biomass.model)
 bio.pred <- comm_means %>%
   ungroup() %>%
   group_by(Location) %>%
-  select(Location, Site) %>%
+  dplyr::select(Location, Site) %>%
   add_predicted_draws(biomass.model, n = 1000) %>%
   mutate(pred.biomass = exp(.prediction))
 
@@ -505,13 +512,6 @@ mds.points <- as.data.frame(scores(comp_mds, "species")) %>%
   add_column(Genspe = rownames(.)) %>%
   right_join(simspecies)
 
-# not run
-# genspeabu <- comms %>%
-#   group_by(Genspe, Family) %>%
-#   summarize(count = n()) %>%
-#   inner_join(mds.points)
-
-
 ####Fig. 2a####
 # ggplot with MDS results, location convex hulls, and SIMPER species highlighted
 comp_plot <- ggplot(site.scores, aes(x = NMDS1, y = NMDS2)) +
@@ -578,14 +578,33 @@ benth.cc <- benth.tidy %>%
   dplyr::select(location, site, sitename, livecoral_other, livecoral_branching) %>%
   mutate(total_cc = livecoral_other+livecoral_branching)
 
-###run mds
+####2. Data analysis####
+# run mds
 benth.mds <- metaMDS(benth.tidy[-c(1:4)], metric = "Bray", trymax = 1000)
+# examine mds
 benth.mds
+# examine stressplot
 stressplot(benth.mds)
 
+# run PERMANOVA on benthic data
 perm.benth = adonis(benth.tidy[-c(1:4)] ~ location, benth.tidy, distance = "Bray", permutations = 999)
+# check PERMANOVA
 perm.benth
-###get values and plot in ggplot
+
+# also running a Bayesian linear model to look at coral cover (logit transformed)
+cc.model <- brm(logit_scaled(total_cc) ~ location + (1|site), 
+                            data = benth.cc, control = list(adapt_delta = 0.999, max_treedepth = 15))
+# look at summary 
+summary(cc.model)
+# Population-Level Effects: 
+#             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept      -1.17      0.60    -2.27     0.00 1.01     1591     1289
+# locationGoO     0.03      0.84    -1.49     1.64 1.00     1898     1438
+
+# plot to validate (muted)
+# plot(cc.model)
+
+# get values from MDS for plotting purposes and combine with benth.tidy dataset
 site.scores.benth <- as.tibble(scores(benth.mds)) %>%
   mutate(location = benth.tidy$location,
          site = benth.tidy$site,
@@ -599,43 +618,28 @@ site.scores.benth <- as.tibble(scores(benth.mds)) %>%
                               site == "Snoopy" ~ 6)) %>%
   mutate(Coral_cover = livecoral_other + livecoral_branching)
 
-
+# also get point estimates of the categories
 mds.points.benth <- as.data.frame(scores(benth.mds, "species")) %>%
   add_column(category = rownames(.))
 
-point.plot.benth <- ggplot(mds.points.benth) +
-  theme_sjb() +
-  geom_segment(aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
-               arrow = arrow(length = unit(0.3, "cm")), color = "grey69",
-               inherit.aes = F) +
-  theme(legend.position = "top") +
-  geom_text_repel(aes(x=NMDS1, NMDS2, label=category), size=3, inherit.aes = F) +
-  scale_y_continuous(limits = c(-0.75, 0.75), breaks = seq(-0.75, 0.75, 0.25)) +
-  scale_x_continuous(limits = c(-1.2, 1.2)) +
-  xlab("NMDS1") +
-  ylab("NMDS2")
-point.plot.benth
-###create convex hulls function
+# create convex hulls function
 convex_hull <- function(site.scores.benth) site.scores.benth[chull(site.scores.benth$NMDS1, site.scores.benth$NMDS2),] 
 
-###run convex hulls on habitats
-site_hulls <- ddply(site.scores.benth, "location", convex_hull)
+# run convex hulls on locations
+location_hulls <- ddply(site.scores.benth, "location", convex_hull)
 
-
-###create vector with habitat names in center of convex hulls
-site_centers <- site_hulls %>% group_by(location) %>% summarize(NMDS1 = mean(NMDS1), NMDS2 = mean(NMDS2))
-
-###plot mds results
-# plot one species name
+####Fig. 2b####
+# plot mds results
 comp.plot.benth <- ggplot(site.scores.benth, aes(x = NMDS1, y = NMDS2)) +
   #overlay convex hulls
   #overlay points
   geom_point(aes(color = location, group = location, fill = location, size = Coral_cover,
                              shape = reorder(site, sort(as.numeric(ordervar))))) +
-    geom_polygon(data = site_hulls, aes(x = NMDS1, y = NMDS2, 
+    geom_polygon(data = location_hulls, aes(x = NMDS1, y = NMDS2, 
                                          fill = location,
                                          group = location),
                alpha = 0.4, lty = 1, lwd = 0.1, color = "black") +
+  # add points of benthic categories
     geom_segment(data = mds.points.benth, aes(x=0, xend=NMDS1, y=0, yend=NMDS2),
                arrow = arrow(length = unit(0.2, "cm")), color = "black", lwd = 0.25,
                inherit.aes = F) +
@@ -655,16 +659,11 @@ comp.plot.benth <- ggplot(site.scores.benth, aes(x = NMDS1, y = NMDS2)) +
   xlab("NMDS1") +
   ylab("NMDS2")
 
+# look at plot
 comp.plot.benth
 
-
-#run GLM with abundance data and offset for surface area sampled
-cc.model <- brm(logit_scaled(total_cc) ~ location + (1|site), 
-                            data = benth.cc, control = list(adapt_delta = 0.999, max_treedepth = 15))
-summary(cc.model)
-
-ggsave("Plots/BenthicPlot.pdf", plot = comp.plot.benth, width = 8, height = 8, useDingbats = FALSE)
-
+# save plot (muted)
+# ggsave("Plots/BenthicPlot.pdf", plot = comp.plot.benth, width = 8, height = 8, useDingbats = FALSE)
 ```
 
 To determine potential drivers of the recovered differences in cryptobenthic communities, we tested individual tolerances to water temoeratures in a laboratory setting. Specifically, we ran CTmin and CTmax trials, where an individual is exposed to slowlyi increasing or decreasing temperatures until it is visually affected (i.e., loss of equilibrium, uncoordinated swimming). The temperature at which this occurs is recorded as the critical thermal maximum or minimum. We ran these trials on individuals collected from six species.
@@ -733,7 +732,7 @@ contrasts_max
 #write.csv(contrasts_max, file = ("Data/TableS2.csv"))
 
 # same procedure for CTmin
-minmod <- brm(Ctmin ~ taxloc, data = ctmin,  control = list(adapt_delta = 0.995, max_treedepth = 18), iter = 5000);beep(sound = "coin")
+minmod <- brm(Ctmin ~ taxloc, data = ctmin,  control = list(adapt_delta = 0.995, max_treedepth = 18), iter = 5000)
 # get summary
 summary(minmod)
 # Population-Level Effects: 
@@ -824,250 +823,6 @@ ctplots <- gbm::grid.arrange( ctlegend, gridExtra::arrangeGrob(ctmin.pred.plot +
 # ggsave("Plots/Fig3_MS.pdf", plot = ctplots, width = 10, height = 10)
 ```
 
-
-
-```{r SIZE: E. ventermaculis and C. anomalus}
-size.strs <- read.csv(file = "Data/UAE_cryptosize_comb.csv")
-
-size.strs.event <- size.strs %>%
-  filter(Species %in% c("ENNEVENT")) 
-
-size.model.event <- brm(log(W) ~ (log(TL) + Location), data = size.strs.event)
-summary(size.model.event)
-
-size.preds.event <- size.strs.event %>%
-  group_by(Location) %>%  
-  data_grid(TL = seq_range(TL, n = 100)) %>%
-  add_fitted_draws(size.model.event, n = 500) %>%
-  mutate(backtrans = exp(.value))
-
-event.plot <- ggplot(size.preds.event, aes(x = TL, y = W, color = ordered(Location))) +
-  geom_point(data = size.strs.event, aes(fill = Location), alpha = 0.8, size = 1.2, shape = 23, color = "black", stroke = 0.1) +
-  geom_line(aes(y = backtrans, group = paste(Location, .draw)), alpha = .1, lwd = 0.1) +
-  scale_color_manual(values = uaecols) +
-  scale_fill_manual(values = uaecols) +
-  ylab("Body weight in g") +
-  xlab("Total length (TL) in mm") +
-  theme_sjb() +
-  theme(legend.position = "none") +
-  scale_y_continuous(limits = c(0,0.4), breaks = seq(0,0.4,0.1)) +
-  scale_x_continuous(limits = c(10,32), breaks = seq(10,32,5)) +
-  annotate("text", x = 10, y = 0.4, size = 3, label = "(a)")
-event.plot
-
-
-size.strs.canom <- size.strs %>%
-  filter(Species %in% c("CORYANOM"))
-
-size.strs.canom = size.strs.canom[-145,]
-
-size.model.canom <- brm(log(W) ~ (log(TL) + Location), data = size.strs.canom)
-summary(size.model.canom)
-
-size.preds.canom <- size.strs.canom %>%
-  group_by(Location) %>%  
-  data_grid(TL = seq_range(TL, n = 100)) %>%
-  add_fitted_draws(size.model.canom, n = 500) %>%
-  mutate(backtrans = exp(.value))
-
-canom.plot <- ggplot(size.preds.canom, aes(x = TL, y = W, color = ordered(Location))) +
-  geom_point(data = size.strs.canom, aes(fill = Location), size = 1.2, alpha = 0.8, shape = 23, color = "black", stroke = 0.1) +
-  geom_line(aes(y = backtrans, group = paste(Location, .draw)), alpha = .1, lwd = 0.1) +
-  scale_color_manual(values = uaecols) +
-  scale_fill_manual(values = uaecols) +
-  ylab("Body weight in g") +
-  xlab("Total length (TL) in mm") +
-  theme_sjb() +
-  theme(legend.position = "none") +
-  scale_y_continuous(limits = c(0,4.2), breaks = seq(0,4.2,1)) +
-  scale_x_continuous(limits = c(10,80), breaks = seq(10,80,15)) +
-  annotate("text", x = 10, y = 4.2, size = 3, label = "(b)")
-canom.plot
-
-size.strs.epulc <- size.strs %>%
-  filter(Species %in% c("ECSEPULC")) 
-
-size.model.epulc <- brm(log(W) ~ (log(TL) + Location), data = size.strs.epulc)
-summary(size.model.epulc)
-
-size.preds.epulc <- size.strs.epulc %>%
-  group_by(Location) %>%  
-  data_grid(TL = seq_range(TL, n = 100)) %>%
-  add_fitted_draws(size.model.epulc, n = 500) %>%
-  mutate(backtrans = exp(.value))
-
-epulc.plot <- ggplot(size.preds.epulc, aes(x = TL, y = W, color = ordered(Location))) +
-  geom_point(data = size.strs.epulc, aes(fill = Location), size = 1.2, alpha = 0.8, shape = 23, color = "black", stroke = 0.1) +
-  geom_line(aes(y = backtrans, group = paste(Location, .draw)), alpha = .1, lwd = 0.1) +
-  scale_color_manual(values = uaecols) +
-  scale_fill_manual(values = uaecols) +
-  ylab("Body weight in g") +
-  xlab("Total length (TL) in mm") +
-  theme_sjb() +
-  theme(legend.position = "none") +
-  scale_y_continuous(limits = c(0,5), breaks = seq(0,5,1)) +
-  scale_x_continuous(limits = c(15,85), breaks = seq(15,85,10)) +
-  annotate("text", x = 15, y = 5, size = 3, label = "(c)")
-epulc.plot
-
-
-Fig6 <- ggarrange(event.plot, canom.plot, epulc.plot, ncol = 3, nrow = 1)
-ggsave("Plots/Fig6_MS.pdf", Fig6, width = 8, height = 4, useDingbats = TRUE)
-###comp abundance of three species in AG & GoO
-```
-
-```{r ABUNDANCE: THREE SPECIES COMP}
-abu.event <- comms %>%
-  filter(Tax == "ENNEVENT") %>%
-  group_by(Location, Site, Sitename, Sitenumber) %>%
-  summarize(Abundance = n(), SA = mean(SA)) %>%
-  mutate(Density = Abundance/SA,
-         site_intercepts = case_when(Site == "Dhabiya" ~ 1.90,
-                                     Site == "RasGhanada" ~ 1.80,
-                                     Site == "Saadiyat" ~ 1.70,
-                                     Site == "Dibba" ~ 0.9,
-                                     Site == "SharmRock" ~ 0.80,
-                                     Site == "Snoopy" ~ 0.70),
-         site_reord = factor(Site, levels = sort(levels(site_intercepts))))
-
-#run GLM with abundance data and offset for surface area sampled
-event.abu.model <- brm(Abundance ~ Location + (1|Site), 
-                            data = abu.event, family = negbinomial, control = list(adapt_delta = 0.999, max_treedepth = 15))
-summary(event.abu.model)
-event.abu.pred <- abu.event %>%
-  data_grid(Location) %>%
-  add_fitted_draws(event.abu.model, n = 1000) %>%
-  mutate(pred.density = exp(.value))
-
-event.abu.median <- event.abu.pred %>%
-  group_by(Location) %>%
-  summarize(median = median(pred.density), sd = sd(pred.density)) %>%
-  mutate(se = sd/sqrt(18))
-event.abu.median
-
-event.abu.pred.plot <- ggplot(data = event.abu.pred) +
-  geom_halfeyeh(aes(y = rev(Location), x = pred.density, fill = Location), color = "black") +
-  geom_jitter(aes(x = Density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
-             data = abu.event, height = 0.02, 
-             alpha = 0.5, size = 0.8) +
-  scale_color_manual(values = uaecols) +
-  scale_fill_manual(values = alpha(uaecols, 0.5)) +
-  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-  scale_x_log10(limits = c(0.01,5e3), breaks=c(0,0.01,0.1,1,10,100), labels=c(0,0.01,0.1,1,10,100)) +
-  theme_sjb() +
-  theme(axis.text.y = element_blank(), 
-        axis.ticks.y = element_blank(),
-        axis.title.y = element_blank(),
-        legend.position = "top",
-        legend.box = "vertical") +
-  guides(fill = guide_legend(nrow = 1),
-         shape = guide_legend(nrow = 1)) +
-  xlab(expression(paste("Density of cryptobenthic fishes (individuals ", m^{-2},")")))+
-  annotate("text", x = 0.1, y = 2.7, size = 3, label = "(b)", color = "black")
-event.abu.pred.plot
-
-
-helper <- abu.event %>%
-  select(Location, Site, Sitename)
-
-
-abu.epulc <- comms %>%
-  filter(Tax %in% c("ECSEPULC"))%>%
-  group_by(Location, Site, Sitename) %>%
-  summarize(Abundance = n(), SA = mean(SA)) %>%
-  mutate(Density = Abundance/SA,
-         site_intercepts = case_when(Site == "Dhabiya" ~ 1.90,
-                                     Site == "RasGhanada" ~ 1.80,
-                                     Site == "Saadiyat" ~ 1.70,
-                                     Site == "Dibba" ~ 0.9,
-                                     Site == "SharmRock" ~ 0.80,
-                                     Site == "Snoopy" ~ 0.70),
-         site_reord = factor(Site, levels = sort(levels(site_intercepts)))) %>%
-  right_join(helper) %>%
-  replace_na(list(Abundance = 0, SA = 0, Density = 0))
-
-
-#run GLM with abundance data and offset for surface area sampled
-epulc.abu.model <- brm(Abundance ~ Location + (1|Site), 
-                            data = abu.epulc,family = negbinomial, control = list(adapt_delta = 0.999, max_treedepth = 15))
-summary(epulc.abu.model)
-epulc.abu.pred <- abu.event %>%
-  data_grid(Location) %>%
-  add_fitted_draws(event.abu.model, n = 1000) %>%
-  mutate(pred.density = exp(.value))
-
-event.abu.median <- event.abu.pred %>%
-  group_by(Location) %>%
-  summarize(median = median(pred.density), sd = sd(pred.density)) %>%
-  mutate(se = sd/sqrt(18))
-event.abu.median
-
-event.abu.pred.plot <- ggplot(data = event.abu.pred) +
-  geom_halfeyeh(aes(y = rev(Location), x = pred.density, fill = Location), color = "black") +
-  geom_jitter(aes(x = Density, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
-             data = abu.event, height = 0.02, 
-             alpha = 0.5, size = 0.8) +
-  scale_color_manual(values = uaecols) +
-  scale_fill_manual(values = alpha(uaecols, 0.5)) +
-  scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-  scale_x_log10(limits = c(0.01,5e3), breaks=c(0,0.01,0.1,1,10,100), labels=c(0,0.01,0.1,1,10,100)) +
-  theme_sjb() +
-  theme(axis.text.y = element_blank(), 
-        axis.ticks.y = element_blank(),
-        axis.title.y = element_blank(),
-        legend.position = "top",
-        legend.box = "vertical") +
-  guides(fill = guide_legend(nrow = 1),
-         shape = guide_legend(nrow = 1)) +
-  xlab(expression(paste("Density of cryptobenthic fishes (individuals ", m^{-2},")")))+
-  annotate("text", x = 0.1, y = 2.7, size = 3, label = "(b)", color = "black")
-event.abu.pred.plot
-
-
-
-helper <- abu.event %>%
-  select(Location, Site, Sitename)
-
-
-abu.canom <- comms %>%
-  filter(Tax %in% c("CORYANOM"))%>%
-  group_by(Location, Site, Sitename) %>%
-  summarize(Abundance = n(), SA = mean(SA)) %>%
-  mutate(Density = Abundance/SA,
-         site_intercepts = case_when(Site == "Dhabiya" ~ 1.90,
-                                     Site == "RasGhanada" ~ 1.80,
-                                     Site == "Saadiyat" ~ 1.70,
-                                     Site == "Dibba" ~ 0.9,
-                                     Site == "SharmRock" ~ 0.80,
-                                     Site == "Snoopy" ~ 0.70),
-         site_reord = factor(Site, levels = sort(levels(site_intercepts))))%>%
-  right_join(helper) %>%
-  replace_na(list(Abundance = 0, SA = 0, Density = 0))
-
-
-#run GLM with abundance data and offset for surface area sampled
-canom.abu.model <- brm(Abundance ~ Location + SA + (1|Site), 
-                            data = abu.canom,family = negbinomial, control = list(adapt_delta = 0.999, max_treedepth = 15))
-
-summary(canom.abu.model)
-
-abu.canom <- comms %>%
-  filter(Tax == "CORYANOM")
-
-event_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summarize(Biomass = sum(W), Abundance = n(), Speciesrichness = length(unique(Genspe)), SA = mean(SA)) %>%
-  mutate(Density = Abundance/SA,
-         Biomass_per_m2 = Biomass/SA,
-         Species_density = Speciesrichness/SA,
-         site_intercepts = case_when(Site == "Dhabiya" ~ 1.90,
-                                     Site == "RasGhanada" ~ 1.80,
-                                     Site == "Saadiyat" ~ 1.70,
-                                     Site == "Dibba" ~ 0.9,
-                                     Site == "SharmRock" ~ 0.80,
-                                     Site == "Snoopy" ~ 0.70),
-         site_reord = factor(Site, levels = sort(levels(site_intercepts))))
-
-```
-
 Then, we sought to investigate dietary preferences of species and compare diets of species in the Arabian Gulf and Gulf of Oman. To do so, we used gut content DNA metabarcoding. We removed whole guts of individuals across six species, with three species sampled from both locations. We used two primers (COI and 23S) to investigate use of animal and algal prey, respectively. We applied network theory to examine the structure of dietary interactions across all sampled individuals. Chunk uses the datasets: guts_meta, coi_seqs, and 23sseqs
 
 ```{r DIET METABARCODING: NETWORK ANALYSES}
@@ -1096,18 +851,18 @@ samplesize <- coi.sub %>%
 
 # turn data into a presence-absence dataset, where sequence reads are replaced with 1 = present, 0 = absent
 coi.pa.taxloc <- coi.sub %>%
-  select(-c(ID.match, Location, Tax)) %>%
+  dplyr::select(-c(ID.match, Location, Tax)) %>%
   mutate_all(funs(case_when(. > 0 ~ 1,
                        TRUE ~ 0))) %>%
   add_column(ID.match = coi.sub$ID.match) %>%
-  select(ID.match, everything())
+  dplyr::select(ID.match, everything())
 
 # get metadata for just the species present in coi.sub
 meta.coi.all <- coi.sub[c(1:3)]
 
 # prepare data for plotting (to be merged back in later): creating a data frame in long format that has each interaction as a row, with information on individuals, sequences, location, and species as columns
 network.coi.all <- coi.pa.taxloc %>%
-  select(-rowsum) %>%
+  dplyr::select(-rowsum) %>%
   pivot_longer(cols = 2:547, names_to = "ID") %>%
   filter(value > 0) %>%
   left_join(meta.coi.all[1:3], by = "ID.match") %>%
@@ -1132,13 +887,13 @@ mod.coi <- metaComputeModules(network.coi.bip[-1], method = "Beckett", N = 20, f
 
 # extract modularity values and membership for each individual
 pred.modularity <- as.data.frame(mod.coi@modules[-1, -c(1,2) ]) %>%
-  select(1:78) %>%
+  dplyr::select(1:78) %>%
   rename_at(vars(colnames(.)), ~ network.coi.bip$ID.match) %>%
   mutate(module = 1:5) %>%
   pivot_longer(cols = 1:78, names_to = "ID.match", values_to = "value") %>%
   filter(value > 0) %>%
   left_join(meta.coi.all) %>%
-  select(-value) %>%
+  dplyr::select(-value) %>%
   unite("taxloc", Tax:Location, sep = ".", remove = F) %>%
   arrange(taxloc) %>%
   unite(taxloc, ID.match, col = "xval", remove = F)
@@ -1148,7 +903,7 @@ pred.modularity <- as.data.frame(mod.coi@modules[-1, -c(1,2) ]) %>%
 
 # load results (prey_modularity) into environment (deleting number column)
 pred.modularity <- read.csv(file = "Data/COImembership_20iter.csv") %>%
-  select(-X)
+  dplyr::select(-X)
 
 # combine with network.coi.all data created earlier
 module.tree.coi <- network.coi.all %>%
@@ -1158,7 +913,7 @@ module.tree.coi <- network.coi.all %>%
 # get unique combinations of OTUs and locations
 share.color <- module.tree.coi %>%
   ungroup() %>%
-  select(ID, Location) %>%
+  dplyr::select(ID, Location) %>%
   distinct() 
 
 # assign OTUs to be either shared between locations or unique
@@ -1224,29 +979,29 @@ cnames <- as.character(seqs23s$ESV)
 # turn into wide format with every ESV as column
 sub23s <- seqs23s %>%
   #grab columns of fish gut specimens
-  select(., contains("UAE18")) %>%
+  dplyr::select(., contains("UAE18")) %>%
   rownames_to_column %>% 
   gather(var, value, -rowname) %>% 
   spread(rowname, value) %>%
   set_colnames(c("ID.match", cnames)) %>%
   join(guts.meta[c("Location", "Tax", "ID.match")], by = "ID.match") %>%
-  select(ID.match, Location, Tax, everything()) %>% 
+  dplyr::select(ID.match, Location, Tax, everything()) %>% 
   mutate(rowsum = rowSums(.[4:3009]))
 
 #create presence absence dataset
 pa23s.taxloc <- sub23s %>%
-  select(-c(ID.match, Location, Tax)) %>%
+  dplyr::select(-c(ID.match, Location, Tax)) %>%
   mutate_all(funs(case_when(. > 0 ~ 1,
                        TRUE ~ 0))) %>%
   add_column(ID.match = sub23s$ID.match) %>%
-  select(ID.match, everything())
+  dplyr::select(ID.match, everything())
 
 # get first three columns of metadata
 meta.23s.all <- sub23s[c(1:3)]
 
 # create long format dataset for plotting
 network.23s.all <- pa23s.taxloc %>%
-  select(-rowsum) %>%
+  dplyr::select(-rowsum) %>%
   pivot_longer(cols = 2:3007, names_to = "ID") %>%
   filter(value > 0) %>%
   left_join(meta.23s.all[1:3], by = "ID.match") %>%
@@ -1273,13 +1028,13 @@ mod.23s <- metaComputeModules(network.23s.bip[-1], method = "Beckett", N = 20, f
 
 # prepare modularity data set from the results as before
 pred.modularity.23s <- as.data.frame(mod.23s@modules[-1, -c(1,2) ]) %>%
-  select(1:86) %>%
+  dplyr::select(1:86) %>%
   rename_at(vars(colnames(.)), ~ network.23s.bip$ID.match)%>%
   mutate(module = 1:5) %>%
   pivot_longer(cols = 1:86, names_to = "ID.match", values_to = "value") %>%
   filter(value > 0) %>%
   left_join(meta.23s.all) %>%
-  select(-value) %>%
+  dplyr::select(-value) %>%
   unite("taxloc", Tax:Location, sep = ".", remove = F) %>%
   arrange(taxloc) %>%
   unite(taxloc, ID.match, col = "xval", remove = F)
@@ -1289,7 +1044,7 @@ pred.modularity.23s <- as.data.frame(mod.23s@modules[-1, -c(1,2) ]) %>%
 
 # load modularity dataset back into the system
 pred.modularity.23s <- read.csv(file = "Data/23smembership_20iter.csv") %>%
-  select(-X)
+  dplyr::select(-X)
 
 # combine with network dataset 
 module.tree.23s <- network.23s.all %>%
@@ -1298,7 +1053,7 @@ module.tree.23s <- network.23s.all %>%
 # create helper dataset for color assignment as before
 share.color.23s <- module.tree.23s %>%
   ungroup() %>%
-  select(ID, Location) %>%
+  dplyr::select(ID, Location) %>%
   distinct() 
 
 # as above
@@ -1358,7 +1113,7 @@ We further sought to examine the richness of prey items for each species in the 
 ####1. Data wrangling####
 # coi data: get number of OTUs and sequences for each individual
 preydiv.coi <- coi.sub %>%
-  select(-rowsum) %>%
+  dplyr::select(-rowsum) %>%
   pivot_longer(OTU_8:OTU_394, names_to = "OTUs") %>%
   mutate(presabs = case_when(value > 0 ~ 1,
                               TRUE ~ 0)) %>%
@@ -1369,30 +1124,30 @@ preydiv.coi
 
 # create  new metadata helper
 coi.meta.rare <- coi.seqs %>%
-  select(ID, UAE18005.1:UAE18867.1) %>%
+  dplyr::select(ID, UAE18005.1:UAE18867.1) %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
   pivot_wider(names_from = "ID", values_from = "value") %>%
   rename(ID.match = name) %>%
   left_join(preydiv.coi, by = "ID.match") %>%
   unite(Location, Tax, col = "ID", remove = F) %>%
-  select(-nb.otu.coi, -nb.seq.coi) %>%
-  select(ID, Location, Tax) %>%
+  dplyr::select(-nb.otu.coi, -nb.seq.coi) %>%
+  dplyr::select(ID, Location, Tax) %>%
   filter(ID != "NA_NA")
 
 # turn rarefaction data into wide format
 coi.rare <- coi.seqs %>%
-  select(ID, UAE18005.1:UAE18867.1) %>%
+  dplyr::select(ID, UAE18005.1:UAE18867.1) %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
   pivot_wider(names_from = "ID", values_from = "value") %>%
   rename(ID.match = name) %>%
   left_join(preydiv.coi, by = "ID.match") %>%
   unite(Location, Tax, col = "ID", remove = T)%>%
-  select(-ID.match, -nb.otu.coi, -nb.seq.coi) %>%
+  dplyr::select(-ID.match, -nb.otu.coi, -nb.seq.coi) %>%
   group_by(ID) %>%
   summarize_all(funs(sum(.))) %>%
   pivot_longer(cols = 2:547) %>%
   pivot_wider(names_from = "ID", values_from = "value") %>%
-  select(-NA_NA)
+  dplyr::select(-NA_NA)
 
 # need rownanems to work with lists so quick workaround to get rownames in data frame
 coi.rare1 <- as.data.frame(coi.rare)
@@ -1458,7 +1213,7 @@ rarefactionplot.coi
 # same as previously
 # 23s data: same for esvs and sequences
 preydiv.23s <-   sub23s %>%
-  select(-rowsum) %>%
+  dplyr::select(-rowsum) %>%
   pivot_longer(ESV_000034:ESV_036113, names_to = "ESVs") %>%
   mutate(presabs = case_when(value > 0 ~ 1,
                               TRUE ~ 0)) %>%
@@ -1469,24 +1224,24 @@ preydiv.23s
 
 # new metadata helper
 meta23s.rare <- seqs23s %>%
-  select(ESV, UAE18005.1:UAE18867.1) %>%
+  dplyr::select(ESV, UAE18005.1:UAE18867.1) %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
   pivot_wider(names_from = "ESV", values_from = "value") %>%
   rename(ID.match = name) %>%
   left_join(preydiv.23s, by = "ID.match") %>%
   unite(Location, Tax, col = "ID", remove = F) %>%
-  select(-nb.esv.23s, -nb.seq.23s) %>%
-  select(ID, Location, Tax) 
+  dplyr::select(-nb.esv.23s, -nb.seq.23s) %>%
+  dplyr::select(ID, Location, Tax) 
 
 # same as above
 rare23s <- seqs23s %>%
-  select(ESV, UAE18005.1:UAE18867.1) %>%
+  dplyr::select(ESV, UAE18005.1:UAE18867.1) %>%
   pivot_longer(cols = UAE18005.1:UAE18867.1) %>%
   pivot_wider(names_from = "ESV", values_from = "value") %>%
   rename(ID.match = name) %>%
   left_join(preydiv.23s, by = "ID.match") %>%
   unite(Location, Tax, col = "ID", remove = T)%>%
-  select(-ID.match, -nb.esv.23s, -nb.seq.23s) %>%
+  dplyr::select(-ID.match, -nb.esv.23s, -nb.seq.23s) %>%
   group_by(ID) %>%
   summarize_all(funs(sum(.))) %>%
   pivot_longer(cols = 2:3007) %>%
@@ -1562,182 +1317,328 @@ FigS1 <- gridExtra::arrangeGrob(rarefactionplot.coi + theme(legend.position="non
 # ggsave("Plots/FigS1_MS.png", plot = FigS1, width = 8, height = 10)
 ```
 
+Moreover, we investigated the size structure of populations of three species(Coryogalops anomolus, Ecsenius pulcher, Enneapterygius ventermaculus) as well as their abundances in the two locations. Used data represents a subset of the community datsets obtained from the clove-oil stations.
+
+```{r SIZE STRUCTURE AND ABUNDANCES}
+####Size structure####
+####1. Data wrangling####
+
+# filter data for the three species
+# E. ventermaculus
+size.strs.event <- size.strs %>%
+  filter(Species %in% c("ENNEVENT")) 
+
+# C. anomolus
+size.strs.canom <- size.strs %>%
+  filter(Species %in% c("CORYANOM"))
+# Yikes -- outlier in the data, must have falsely recorded weight. Remove!
+size.strs.canom = size.strs.canom[-145,]
+
+# E. pulcher
+size.strs.epulc <- size.strs %>%
+  filter(Species %in% c("ECSEPULC")) 
+
+####2. Data analysis####
+# run Bayesian log-log models for each species separately
+size.model.event <- brm(log(W) ~ (log(TL) + Location), data = size.strs.event)
+# get summary
+summary(size.model.event)
+# Population-Level Effects: 
+#            Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept    -11.86      0.16   -12.18   -11.53 1.00     3786     3176
+# logTL          3.11      0.05     3.00     3.22 1.00     3672     3258
+# LocationGO     0.16      0.01     0.13     0.18 1.00     3124     3062
+
+# chains (muted)
+# plot(size.model.event)
+
+# get fitted values for 500 draws
+size.preds.event <- size.strs.event %>%
+  group_by(Location) %>%  
+  data_grid(TL = seq_range(TL, n = 100)) %>%
+  add_fitted_draws(size.model.event, n = 500) %>%
+  mutate(backtrans = exp(.value))
+
+####Fig. 5a####
+event.plot <- ggplot(size.preds.event, aes(x = TL, y = W, color = ordered(Location))) +
+  geom_point(data = size.strs.event, aes(fill = Location), alpha = 0.8, size = 1.2, shape = 23, color = "black", stroke = 0.1) +
+  geom_line(aes(y = backtrans, group = paste(Location, .draw)), alpha = .1, lwd = 0.1) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
+  ylab("Body weight in g") +
+  xlab("Total length (TL) in mm") +
+  theme_sjb() +
+  theme(legend.position = "none") +
+  scale_y_continuous(limits = c(0,0.4), breaks = seq(0,0.4,0.1)) +
+  scale_x_continuous(limits = c(10,32), breaks = seq(10,32,5)) +
+  annotate("text", x = 10, y = 0.4, size = 3, label = "(a)")
+# check plot
+event.plot
+
+# repreat for C. anomolus
+size.model.canom <- brm(log(W) ~ (log(TL) + Location), data = size.strs.canom)
+# get summary
+summary(size.model.canom)
+# Population-Level Effects: 
+#            Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept    -10.64      0.13   -10.89   -10.40 1.00     4160     2808
+# logTL          2.74      0.04     2.66     2.81 1.00     4220     2806
+# LocationGO     0.15      0.03     0.09     0.21 1.00     4272     3003
+
+# chains (muted)
+# plot(size.model.canom)
+
+# fitted draws
+size.preds.canom <- size.strs.canom %>%
+  group_by(Location) %>%  
+  data_grid(TL = seq_range(TL, n = 100)) %>%
+  add_fitted_draws(size.model.canom, n = 500) %>%
+  mutate(backtrans = exp(.value))
+
+####Fig. 5b####
+# plot data
+canom.plot <- ggplot(size.preds.canom, aes(x = TL, y = W, color = ordered(Location))) +
+  geom_point(data = size.strs.canom, aes(fill = Location), size = 1.2, alpha = 0.8, shape = 23, color = "black", stroke = 0.1) +
+  geom_line(aes(y = backtrans, group = paste(Location, .draw)), alpha = .1, lwd = 0.1) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
+  ylab("Body weight in g") +
+  xlab("Total length (TL) in mm") +
+  theme_sjb() +
+  theme(legend.position = "none") +
+  scale_y_continuous(limits = c(0,4.2), breaks = seq(0,4.2,1)) +
+  scale_x_continuous(limits = c(10,80), breaks = seq(10,80,15)) +
+  annotate("text", x = 10, y = 4.2, size = 3, label = "(b)")
+#check plot
+canom.plot
+
+# and for E. pulcher
+size.model.epulc <- brm(log(W) ~ (log(TL) + Location), data = size.strs.epulc)
+#get summary
+summary(size.model.epulc)
+# Population-Level Effects: 
+#            Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept    -10.27      0.11   -10.49   -10.05 1.00     4235     2992
+# logTL          2.61      0.03     2.55     2.68 1.00     4032     2775
+# LocationGO     0.19      0.03     0.14     0.25 1.00     4051     2808
+
+# chains (muted)
+# plot(size.model.epulc)
+
+# fitted values
+size.preds.epulc <- size.strs.epulc %>%
+  group_by(Location) %>%  
+  data_grid(TL = seq_range(TL, n = 100)) %>%
+  add_fitted_draws(size.model.epulc, n = 500) %>%
+  mutate(backtrans = exp(.value))
+
+####Fig. 5c####
+epulc.plot <- ggplot(size.preds.epulc, aes(x = TL, y = W, color = ordered(Location))) +
+  geom_point(data = size.strs.epulc, aes(fill = Location), size = 1.2, alpha = 0.8, shape = 23, color = "black", stroke = 0.1) +
+  geom_line(aes(y = backtrans, group = paste(Location, .draw)), alpha = .1, lwd = 0.1) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
+  ylab("Body weight in g") +
+  xlab("Total length (TL) in mm") +
+  theme_sjb() +
+  theme(legend.position = "none") +
+  scale_y_continuous(limits = c(0,5), breaks = seq(0,5,1)) +
+  scale_x_continuous(limits = c(15,85), breaks = seq(15,85,10)) +
+  annotate("text", x = 15, y = 5, size = 3, label = "(c)")
+# check plot
+epulc.plot
+
+####Fig. 5####
+Fig5 <- ggarrange(event.plot, canom.plot, epulc.plot, ncol = 3, nrow = 1)
+# save plot (muted)
+# ggsave("Plots/Fig6_MS.pdf", Fig6, width = 8, height = 4, useDingbats = TRUE)
+
+####Abundances####
+####1. Data wrangling####
+# E. ventermaculus
+abu.event <- comms %>%
+  filter(Tax == "ENNEVENT") %>%
+  group_by(Location, Site, Sitename, Sitenumber) %>%
+  summarize(Abundance = n(), SA = mean(SA)) %>%
+  mutate(Density = Abundance/SA)
+
+# need little helper dataset for C. anom and E. pulcher because they're not present at all sites/stations
+helper <- abu.event %>%
+  dplyr::select(Location, Site, Sitename)
+
+# C. anomolus
+abu.canom <- comms %>%
+  filter(Tax %in% c("CORYANOM"))%>%
+  group_by(Location, Site, Sitename) %>%
+  summarize(Abundance = n(), SA = mean(SA)) %>%
+  mutate(Density = Abundance/SA) %>%
+  right_join(helper) %>%
+  replace_na(list(Abundance = 0, SA = 0, Density = 0))
+
+# E. pulcher
+abu.epulc <- comms %>%
+  filter(Tax %in% c("ECSEPULC"))%>%
+  group_by(Location, Site, Sitename) %>%
+  summarize(Abundance = n(), SA = mean(SA)) %>%
+  mutate(Density = Abundance/SA) %>%
+  right_join(helper) %>%
+  replace_na(list(Abundance = 0, SA = 0, Density = 0))
+
+####2. Data analysis####
+#run GLM with abundance data and negative binomial error structure
+# E. ventermaculus
+event.abu.model <- brm(Abundance ~ Location + (1|Site), 
+                            data = abu.event, family = negbinomial, control = list(adapt_delta = 0.999, max_treedepth = 15))
+# get summary
+summary(event.abu.model)
+# Population-Level Effects: 
+#             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept       2.56      0.68     1.21     3.86 1.00     1417     1284
+# LocationGoO     0.90      0.97    -0.95     2.73 1.00     1549     1729
+# plot(event.abu.model)
+
+# C. anomolus
+canom.abu.model <- brm(Abundance ~ Location + SA + (1|Site), 
+                            data = abu.canom,family = negbinomial, control = list(adapt_delta = 0.999, max_treedepth = 15))
+# get summary
+summary(canom.abu.model)
+# Population-Level Effects: 
+#             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept      -1.10      1.11    -3.64     0.85 1.01     1576     1388
+# LocationGoO    -0.87      0.77    -2.52     0.49 1.01     1885     1637
+# SA              0.69      0.24     0.30     1.25 1.00     1864     1744
+# plot(canom.abu.model)
+
+#E. pulcher
+epulc.abu.model <- brm(Abundance ~ Location + (1|Site), 
+                            data = abu.epulc, family = negbinomial, control = list(adapt_delta = 0.999, max_treedepth = 15))
+# get summary
+summary(epulc.abu.model)
+# Population-Level Effects: 
+#             Estimate Est.Error l-95% CI u-95% CI Rhat Bulk_ESS Tail_ESS
+# Intercept      -1.07      1.85    -5.55     1.59 1.00     1220     1096
+# LocationGoO     3.47      2.42    -0.17     9.14 1.01     1229     1191
+# plot(epulc.abu.model)
+```
+
+Finally, we modeled the individual growth of fishes found in the two locations to obtain process-based estimates of production, transfer, and renewal of biomass through cryptobenthic fishes. The method is based on the modeling performed by Brandl et al. 2019 (Science) and the data collated by Morais & Bellwood 2018. 
 
 ```{r GROWTH MODELING}
-# Load package
-library(sdmpredictors)
-library(rasterVis)
+# code adapted from RA Morais
+####1. Data wrangling####
+growth.data <- left_join (crypto_traits, lenwei, by = 'Family') %>%
+			mutate (Method = 'Otolth',
+					Size = TL/10) %>%
+				tidytrait (dataset = db)
 
-my.sites <- comms %>%
-  group_by(Location, Site) %>%
-  summarize(Lon = mean(Long), Lat = mean(Lat)) %>%
-  as.data.frame(.) %>%
-  unite("Name", c(Location, Site), remove = F) %>%
-  arrange(Name)
-layers <- list_layers(marine = TRUE)
-environment.bottom <- load_layers(c("MS_biogeo15_sst_max_5m",
-                                    "MS_biogeo14_sst_min_5m",
-                                    "MS_biogeo16_sst_range_5m"),
-                                  equalarea=FALSE, rasterstack=TRUE)
+####2. Data analysis####
+# applying rfishprod functions to predict growth and mortality coefficients 
+# define model formula
+fmod <- formula (~ sstmean + MaxSizeTL + Diet + Movimentation + Method)
+set.seed (31)
 
-environment.vars <- data.frame(Name=my.sites$Name, extract(environment.bottom, my.sites[,4:5]))
-environment.vars
+# predicting VBGM parameters
+# TAKES ~10 MINUTES 
+gr <- predKmax (growth.data, dataset = db, fmod = fmod, params = xgboostparams, niter = 1000, return = 'pred');beep(0)
 
-mean(environment.vars$BO_sstmean)
-# Crop raster to fit the North Atlantic
-middleeast <- extent(50, 60, 20, 30)
-temp.middleast <- crop(environment.bottom, middleeast)
+## predict size-specific mortality rates for each individual
+gr$pred$Md <- with (gr$pred, 
+					predM (Lmeas = TL, Lmax = MaxSizeTL, Kmax = Kmax, 
+						   Lr = 1, temp = sstmean, method = 'Function'))
 
-#function to fortify data
-gplot_data <- function(x, maxpixels = 500000)  {
-  x <- raster::sampleRegular(x, maxpixels, asRaster = TRUE)
-  coords <- raster::xyFromCell(x, seq_len(raster::ncell(x)))
-  ## Extract values
-  dat <- utils::stack(as.data.frame(raster::getValues(x))) 
-  names(dat) <- c('value', 'variable')
+### Final object ###
+datafin <- gr$pred
 
-  dat <- dplyr::as.tbl(data.frame(coords, dat))
+# check if sizes and maximum sizes are compatible
+if (any (datafin$Size > datafin$MaxSizeTL)) { "OhOhOh SOMETHING IS WRONG"} else { "ALL GOOD MATE!!"}
+# They are not
 
-  if (!is.null(levels(x))) {
-    dat <- dplyr::left_join(dat, levels(x)[[1]], 
-                            by = c("value" = "ID"))
-  }
-  dat
-}
-
-# apply function
-fort.temp.middleeast <- gplot_data(temp.middleast)
-
-mapdata.max = fort.temp.middleeast %>%
-  filter(variable == "MS_biogeo15_sst_max_5m")
+# get maximum sizes observed for the species with errors
+sppMaxSize <- datafin [which (datafin$Size > datafin$MaxSizeTL),] %>% 
+					group_by (Tax) %>%
+						summarise (MaxSize = max (Size) + 0.05) %>%
+							dplyr::select (Tax, MaxSize) %>%
+								as.data.frame
 
 
-maxplot <- ggplot(data = mapdata.max, aes(x = x, y = y)) +
-  geom_tile(aes(fill = value, color = value)) +
-  geom_point(data = my.sites, aes(x = Lon, y = Lat), color = "black", size = 3, alpha = 0.85) +
-  scale_fill_fish(option = "Trimma_lantana", na.value="white", name = "Temperature", begin = 0.65) +
-  scale_color_fish(option = "Trimma_lantana", na.value="white", begin = 0.65, guide=FALSE) +
-  theme_sjb() + theme(panel.grid.major  = element_blank(),
-          panel.grid.minor = element_blank(),
-          panel.background = element_blank(),
-          panel.border = element_blank(),
-          legend.position = "top") +
-  scale_y_continuous(limits = c(20, 30), breaks = seq(20, 30, 2.5), expand = c(0,0)) +
-  scale_x_continuous(limits = c(50, 60), breaks = seq(50, 60, 2.5), expand = c(0,0)) +
-  xlab("Longitude") +
-  ylab("Latitude") +
-  annotate("text", x = 53.5, y = 26, size = 2, label = "ARABIAN GULF", color = "black", fontface = 2) +
-  annotate("text", x = 58.5, y = 24.5, size = 2, label = "GULF OF OMAN", color = "black", fontface = 2) +
-  annotate("text", x = 52, y = 30, size = 2, label = "a) Maximum", color = "black", fontface = 2) +
-  coord_cartesian(clip="off")
-maxplot
+## merge into  final dataset
+datafin [datafin$Tax %in% sppMaxSize$Tax, 'MaxSizeTL'] <- sppMaxSize[match (datafin [datafin$Tax %in% sppMaxSize$Tax, 'Tax'], sppMaxSize$Tax), 'MaxSize']
 
 
-mapdata.min = fort.temp.middleeast %>%
-  filter(variable == "MS_biogeo14_sst_min_5m")
+## Double-checking ##
+if (any (datafin$Size > datafin$MaxSizeTL)) { "OhOhOh SOMETHING IS WRONG"} else { "ALL GOOD MATE!!"}
 
+## calculate growth and loss through mortality
+datafin <- datafin %>% mutate (EstWeight = a * (Size ^ b),
+							   EstGrowth = somaGain (a = a, b = b, Lmeas = Size, t = 1, 
+							   						 Lmax = MaxSizeTL, Kmax = Kmax, silent = FALSE),
+							   RelGr = EstGrowth / EstWeight,
+							   Growth = (W * RelGr),
+							   MortLoss = somaLoss (M = Md, Wei = W, t = 1)) %>%
+							rename (Weight = 'W') %>%
+								dplyr::select (Location:TL, Full_ID:Genspe, Kmax, Md, Weight,Growth, MortLoss)
+# write data to save progress 					   
+# write.csv (datafin, 'dataproc.csv', row.names = F)
 
-minplot <- ggplot(data = mapdata.min, aes(x = x, y = y)) +
-  geom_tile(aes(fill = value, color = value)) +
-  geom_point(data = my.sites, aes(x = Lon, y = Lat), color = "black", size = 3, alpha = 0.85) +
-  scale_fill_fish(option = "Trimma_lantana", na.value="white", name = "Temperature", end = 0.35) +
-  scale_color_fish(option = "Trimma_lantana", na.value="white", end = 0.35, guide=FALSE) +
-  theme_sjb() + theme(panel.grid.major  = element_blank(),
-          panel.grid.minor = element_blank(),
-          panel.background = element_blank(),
-          panel.border = element_blank(),
-          legend.position = "top") +
-  scale_y_continuous(limits = c(20, 30), breaks = seq(20, 30, 2.5), expand = c(0,0)) +
-  scale_x_continuous(limits = c(50, 60), breaks = seq(50, 60, 2.5), expand = c(0,0)) +
-  xlab("Longitude") +
-  ylab("Latitude") +
-  annotate("text", x = 53.5, y = 26, size = 2, label = "ARABIAN GULF", color = "black", fontface = 2) +
-  annotate("text", x = 58.5, y = 24.5, size = 2, label = "GULF OF OMAN", color = "black", fontface = 2) +
-  annotate("text", x = 52, y = 30, size = 2, label = "b) Minimum", color = "black", fontface = 2) +
-  coord_cartesian(clip="off")
-minplot
+# reload data if you skipped over bootstrapping (muted)
+# datafin <- read.csv ('dataproc.csv')
 
+# Tidying up and calculating Productivity, Consumed Biomass and Turnover
+aggreg <- datafin %>% group_by (Location, Sitename, Sitenumber, Habitat) %>%
+				summarise (Biom = sum (Weight),
+						   Prod = sum (Growth),
+						   Cons = sum (MortLoss),
+						   Turn = (Prod / Biom) + (Cons / Biom)) %>%
+					as.data.frame
 
-mapdata.range = fort.temp.middleeast %>%
-  filter(variable == "MS_biogeo16_sst_range_5m")
+# Standing biomass is in g/area
+# Productivity is in g/area/day
+# Consumed biomass is in g/area/day
+# Turnover is in 1/day						   
 
+####Fig. 6a####
 
-rangeplot <- ggplot(data = mapdata.range, aes(x = x, y = y)) +
-  geom_tile(aes(fill = value, color = value)) +
-  geom_point(data = my.sites, aes(x = Lon, y = Lat), color = "black", size = 3, alpha = 0.85) +
-  scale_fill_fish(option = "Trimma_lantana", na.value="white", name = "Temperature") +
-  scale_color_fish(option = "Trimma_lantana", na.value="white", guide=FALSE) +
-  theme_sjb() + theme(panel.grid.major  = element_blank(),
-          panel.grid.minor = element_blank(),
-          panel.background = element_blank(),
-          panel.border = element_blank(),
-          legend.position = "top") +
-  scale_y_continuous(limits = c(20, 30), breaks = seq(20, 30, 2.5), expand = c(0,0)) +
-  scale_x_continuous(limits = c(50, 60), breaks = seq(50, 60, 2.5), expand = c(0,0)) +
-  xlab("Longitude") +
-  ylab("Latitude") +
-  annotate("text", x = 53.5, y = 26, size = 2, label = "ARABIAN GULF", color = "black", fontface = 2) +
-  annotate("text", x = 58.5, y = 24.5, size = 2, label = "GULF OF OMAN", color = "black", fontface = 2) +
-  annotate("text", x = 52, y = 30, size = 2, label = "c) Range", color = "black", fontface = 2) +
-  coord_cartesian(clip="off")
-rangeplot
+prod <- ggplot(aggreg, aes(x = Location, y = Prod, fill = Location, color = Location)) +
+  geom_violin(alpha = 0.5,draw_quantiles = c(0.025, 0.5, 0.975)) +
+  geom_jitter(alpha = 0.8, size = 2, shape = 23, color = "black", stroke = 0.1) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
+  ylab("Produced biomass in grams") +
+  theme_sjb() +
+  theme(legend.position = "none") +
+  annotate("text", x = 0.5, y = 1.9, size = 3, label = "(a)")
+# show plot
+prod
 
-temp_plots <- ggarrange(maxplot, minplot, rangeplot, ncol = 3, nrow = 1)
-temp_plots
-ggsave("Plots/temperature_plots.png", temp_plots, width = 8, height = 3)
+####Fig. 6b####
+cons <- ggplot(aggreg, aes(x = Location, y = Cons, fill = Location, color = Location)) +
+  geom_violin(alpha = 0.5,draw_quantiles = c(0.025, 0.5, 0.975)) +
+  geom_jitter(alpha = 0.8, size = 2, shape = 23, color = "black", stroke = 0.1) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
+  ylab("Consumed biomass in grams") +
+  theme_sjb() +
+  theme(legend.position = "none") +
+  annotate("text", x = 0.5, y = 0.4, size = 3, label = "(b)")
+# show plot
+cons
 
-# 
-# growth.species <- read.csv("Data/Morais_DS1.csv")
-# growth.group <- read.csv("Data/Morais_DS2.csv")
-# 
-# growth.fam <- growth.species %>%
-#   group_by(Family) %>%
-#   summarize(Kmaxmean = mean(Kmax), LinfTLmean = mean(LinfTL), SSTmean = mean(sstmean))
-# 
-# growth.group.avg <- growth.group %>%
-#   group_by(MaxSizeTL, sstmean) %>%
-#   summarize(Kmaxmean = mean(Kmax), lwrmean = mean(Kmax_lowqt), uprmean = mean(Kmax_upqt))
-# 
-# growthmod <- brm(log(Kmax) ~ (log(LinfTL) * log(sstmean)), data = growth.species, control = list(adapt_delta = 0.90, max_treedepth = 11), iter = 4000)
-# summary(growthmod)
-# plot(growthmod)
-# 
-# growth.pred <- growth.species %>%
-#   data_grid(LinfTL = unique(comms$TL)/10, 
-#             sstmean = c(unique(comms.post$BO2_tempmax_bdmean), unique(comms.post$BO2_tempmean_bdmean), unique(comms.post$BO2_tempmin_bdmean))) %>%
-#   add_predicted_draws(growthmod, n = 50) %>%
-#   mutate(meankmaxback = exp(.prediction)) %>%
-#   group_by(LinfTL, sstmean) %>%
-#   summarize(meankmax = mean(meankmaxback), sdkmax = sd(meankmaxback)) 
-# growth.pred
-# 
-# growth.simul <- comms.post %>%
-#   inner_join(growth.pred, by = c("LinfTL", "sstmean"))
-#     
-#   add_predicted_draws(biomass.model, n = 1000) %>%
-#   mutate(pred.biomass = exp(.prediction))
-# 
-# 
-# bio.pred.plot <- ggplot(data = bio.pred) +
-#   geom_halfeyeh(aes(y = rev(Location), x = pred.biomass, fill = Location)) +
-#   geom_jitter(aes(x = Biomass_per_m2, y = site_intercepts, shape = reorder(Site, sort(as.numeric(site_intercepts))), fill = Location), color = "black", 
-#              data = comm_means, height = 0.02, 
-#              alpha = 0.5, size = 2) +
-#   scale_color_manual(values = c("dodgerblue4", "mediumaquamarine")) +
-#   scale_fill_manual(values = alpha(c("dodgerblue4", "mediumaquamarine"), 0.5)) +
-#   scale_shape_manual(name = "Site", values = c(21,22,23,21,22,23)) +
-#   scale_x_log10(limits = c(0.1,1e3), breaks=c(0,0.1,1,10,1000), labels=c(0,0.1,1,10,1000)) +
-#   theme_bw() +
-#   theme(axis.text.y = element_blank(), 
-#         axis.ticks.y = element_blank(),
-#         axis.title.y = element_blank(),
-#         legend.position = "top") +
-#   guides(fill = guide_legend(nrow = 1),
-#          shape = guide_legend(nrow = 1)) +
-#   xlab(expression(paste("Biomass of cryptobenthic fishes (grams ", m^{-2},")")))
-# bio.pred.plot
-# 
-# x = as.data.frame(table(growth.species$LinfTL, growth.species$sstmean)) %>%
-#   filter(Freq > 0) %>%
-#   arrange(Var1, Var2)
+####Fig. 6c####
+turn <- ggplot(aggreg, aes(x = Location, y = Turn, fill = Location, color = Location)) +
+  geom_violin(alpha = 0.5,draw_quantiles = c(0.025, 0.5, 0.975)) +
+  geom_jitter(alpha = 0.8, size = 2, shape = 23, color = "black", stroke = 0.5, width = 0.2) +
+  scale_color_manual(values = uaecols) +
+  scale_fill_manual(values = uaecols) +
+  ylab("Produced biomass in grams") +
+  theme_sjb() +
+  theme(legend.position = "none") +
+  annotate("text", x = 0.5, y = 0.03, size = 3, label = "(c)")
+# show plot
+turn
+
+####Fig. 6####
+Fig6 <- ggarrange(prod, cons, turn, ncol = 3)
+
+# save plot (muted)
+#ggsave("Plots/Figure6.pdf", Fig6, width = 8, height = 4, useDingbats = F)
 ```
