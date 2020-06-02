@@ -6,7 +6,7 @@ output: html_document
 editor_options:
   chunk_output_type: console
 ---
-Title: Energetic demands of extreme temperatures reduce cryptobenthic coral reef fish diversity and functioning 
+Title: Extreme environmental conditions erode coral reef biodiversity and functioning
 
 Authors: Simon J. Brandl, Jacob L. Johansen, Jordan M. Casey, Luke Tornabene, Renato A. Morais, John A. Burt 
 
@@ -18,7 +18,6 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r LOAD PACKAGES}
 #load packages
-library(plyr)
 library(dplyr)
 library(tidyverse)
 library(vegan)
@@ -44,6 +43,8 @@ library(ncdf4)
 library(raster)
 library(rvest)     
 library(stringr)
+library(patchwork)
+library(lubridate)
 
 # also loading rfishprod package (Morais, in review) from source
 devtools::load_all('rfishprod')
@@ -98,6 +99,10 @@ size.strs <- read.csv(file = "Data/UAE_cryptosize_comb.csv")
 # 9. crypto_traits and lenwei: Datasets to allow growth modeling of individuals for system wide productivity estimates. crypto_traits is the community structure dataset from the clove-oil stations, with a set of traits (MaxSizeTL, Diet,	Schooling,	Movimentation,	sstmean) matched to each individual fish based on species-level data. lenwei provides family-level length-weight relationships from FishBase for all families in the dataset.
 crypto_traits <- read.csv ('Data/traitlist_allfish.csv')
 lenwei <- read.csv ('Data/famlevparamsSJB.csv')
+
+# 10. In situ data loggers: temperature data from data loggers deployed in the two locations
+# load data from in situ loggers
+insitu <- read.csv(file = "Data/insitu_temp.csv")
 
 # set color scheme for all plots using fishualize package
 uaecols <- fish(n = 2, option = "Trimma_lantana", end = 0.3)
@@ -191,6 +196,204 @@ vpalmin = fish(100, alpha = 1, begin = 0, end = 0.8, option = "Coryphaena_hippur
 v(min.min.sst.all, cbpos = "l", pal = vpalmin, zlim = c(16, 22), grid = T,  Save = T, plotname = "min.min.sst", fileformat = "png")
 # same as above
 v(min.min.sst.all, cbpos = "r", pal = vpalmin, zlim = c(16, 22), grid = T,  Save = T, plotname = "min.min.sst.legend", fileformat = "png")
+
+### extract more detail on temperature profiles -- Revision 1
+max_df <- fortify(max2010)
+
+
+```
+
+```{r TEMPERATURE PROFILES IN DETAIL}
+# This script connects to auxilliary script entitled "MODIS Aqua Temperature Data"
+temp2010 <- read.csv(file = "Data/temp_summaries/temp2010.csv") %>%
+  dplyr::select(-X) %>%
+  mutate(year = "2010")
+
+temp2011 <- read.csv(file = "Data/temp_summaries/temp2011.csv") %>%
+  dplyr::select(-X) %>%
+  mutate(year = "2011")
+
+temp2012 <- read.csv(file = "Data/temp_summaries/temp2012.csv") %>%
+  dplyr::select(-X) %>%
+  mutate(year = "2012")
+
+temp2013 <- read.csv(file = "Data/temp_summaries/temp2013.csv") %>%
+  dplyr::select(-X) %>%
+  mutate(year = "2013")
+
+temp2014 <- read.csv(file = "Data/temp_summaries/temp2014.csv") %>%
+  dplyr::select(-X) %>%
+  mutate(year = "2014")
+
+temp2015 <- read.csv(file = "Data/temp_summaries/temp2015.csv") %>%
+  dplyr::select(-X) %>%
+  mutate(year = "2015")
+
+temp2016 <- read.csv(file = "Data/temp_summaries/temp2016.csv") %>%
+  dplyr::select(-X) %>%
+  mutate(year = "2016")
+
+temp2017 <- read.csv(file = "Data/temp_summaries/temp2017.csv") %>%
+  dplyr::select(-X) %>%
+  mutate(year = "2017")
+
+temp2018 <- read.csv(file = "Data/temp_summaries/temp2018.csv") %>%
+  dplyr::select(-X) %>%
+  mutate(year = "2018")
+
+temp.all <- bind_rows(temp2010, temp2011, temp2012, temp2013, temp2014, temp2015, temp2016, temp2017, temp2018) %>%
+  mutate(location = case_when(Site == "Dhabiya" ~ "Arabian Gulf",
+                              Site == "RasGhanada" ~ "Arabian Gulf",
+                              Site == "Saadiyat" ~ "Arabian Gulf",
+                              Site == "Dibba" ~ "Gulf of Oman",
+                              Site == "SharmRock" ~ "Gulf of Oman",
+                              Site == "Snoopy" ~ "Gulf of Oman"))
+
+# tidy data
+temp.remote.sum <- temp.all %>% 
+  group_by(location, quant, year) %>%
+  summarize(mean.remote = mean(temp), max.remote = max(temp), min.remote = min(temp))
+  
+# get highs only
+temp.all.high <- temp.all %>%
+  filter(quant == "high")
+
+# Fig S1 A: max remotely sensed temperatures
+high.plot <- ggplot(temp.all.high, aes(x = year, y = temp)) +
+  geom_violin(aes(fill = location), color = "grey23", position = position_dodge(width = 0.5)) +
+  geom_jitter(aes(shape = location, fill = location), color = "grey23",
+              position = position_jitterdodge(dodge.width = 0.5, jitter.width = 0.1), alpha = 0.5) +
+  theme_bw() +
+  scale_fill_manual(values = uaecols, name = "Location") +
+  scale_shape_manual(values = c(21,23), name = "Location") +
+  theme(legend.position = "top",
+        axis.text = element_text(color = "black"),
+                axis.title.x = element_blank()) +
+  ylab("97.5% of daily temperatures (ºC)") +
+  scale_y_continuous(limits = c(26,33), breaks = seq(26,33,1))
+  
+high.plot
+
+# get lows
+temp.all.low <- temp.all %>%
+  filter(quant == "low")
+
+# # Fig S1 B: min remotely sensed temperatures
+low.plot <- ggplot(temp.all.low, aes(x = year, y = temp)) +
+  geom_violin(aes(fill = location), color = "grey23", position = position_dodge(width = 0.5)) +
+  geom_jitter(aes(shape = location, fill = location), color = "grey23",
+              position = position_jitterdodge(dodge.width = 0.5, jitter.width = 0.1), alpha = 0.5) +
+  theme_bw() +
+  scale_fill_manual(values = uaecols) +
+  scale_color_manual(values = uaecols) +
+  scale_shape_manual(values = c(21,23)) +
+  theme(legend.position = "none",
+        axis.text = element_text(color = "black"),
+        axis.title.x = element_blank()) +
+  ylab("2.5% of daily temperatures (ºC)") +
+  scale_y_continuous(limits = c(18,23), breaks = seq(18,23,1))
+low.plot
+
+temp.year.plots <- high.plot / low.plot +
+  plot_annotation(tag_levels = "A")
+temp.year.plots
+ggsave("Plots/Finished figures/Brandletal_UAE_NEE_FigS2.png", temp.year.plots, width = 8, height = 8)
+
+
+
+### in situ data
+
+empty_as_na <- function(x){
+    if("factor" %in% class(x)) x <- as.character(x) ## since ifelse wont work with factors
+    ifelse(as.character(x)!="", x, NA)
+}
+
+# clean up data
+insitu.data <- insitu %>%
+  mutate_at(vars(DateTime, Dhabiya, RasGhanada, Saadiyat, FalconRock, CoralGarden, AlHarf, AlAqah, Dibba,SharmRocks,SirBuNair), 
+                 funs(gsub("\t", "", .))) %>%
+  mutate_each(funs(empty_as_na)) %>% 
+  separate(DateTime, into = c('date', 'time'), sep=" ", remove = T)
+
+# get data into long format
+insitu.long <- insitu.data %>%
+  pivot_longer(cols = 3:12, names_to = "site", values_to = "temperature") %>%
+  drop_na() %>%
+  mutate(temperature = as.numeric(temperature)) %>%
+  mutate(date = mdy(date),
+         time = as.character(time)) %>%
+  mutate(date_time = ymd_hm(paste(date, time, sep = " "))) %>%
+  mutate(location = case_when(site == "Dhabiya" ~ "Arabian Gulf",
+                              site == "RasGhanada" ~ "Arabian Gulf",
+                              site == "Saadiyat" ~ "Arabian Gulf",
+                              site == "FalconRock" ~ "Musandam",
+                              site == "CoralGarden" ~ "Musandam",
+                              site == "AlHarf" ~ "Musandam",
+                              site == "AlAqah" ~ "Gulf of Oman",
+                              site == "Dibba" ~ "Gulf of Oman",
+                              site == "SharmRocks" ~ "Gulf of Oman",
+                              site == "SirBuNair" ~ "Offshore")) %>%
+  filter(location %in% c("Arabian Gulf", "Gulf of Oman")) %>%
+    arrange(site, date_time) %>%
+  filter(temperature < 45) %>%
+  mutate(date_time_d = date(date_time))
+
+#write.csv(insitu.long, file = "Data/temp.insitu.long.csv", row.names = F)
+
+# get daily max, min and mean estimates
+in.situ.daily <- insitu.long %>%
+  group_by(site, location, date_time_d) %>%
+  summarize(max.temp = max(temperature),
+            min.temp = min(temperature),
+            mean.temp = mean(temperature))
+
+# summary for in text numbers
+in.situ.textsum <- insitu.long %>%
+    dplyr::mutate(year = lubridate::year(date), 
+                month = lubridate::month(date), 
+                day = lubridate::day(date)) %>%
+  mutate(season = case_when(month >= 6 & month <= 8 ~ "summer",
+                            month >= 9 & month <= 11 ~ "fall",
+                            month >= 3 & month <= 5 ~ "spring",
+                            TRUE ~ "winter")) %>%
+  group_by(location, year, season) %>%
+  summarize(max.temp = max(temperature),
+            min.temp = min(temperature),
+            mean.temp = mean(temperature))
+in.situ.textsum
+
+# get number of days for which temperature was >34ºC
+over34 <- insitu.long %>%
+  dplyr::mutate(year = lubridate::year(date), 
+                month = lubridate::month(date), 
+                day = lubridate::day(date)) %>%
+  group_by(date, location, site, year, month, day) %>%
+  summarize(max.temp = max(temperature)) %>%
+  filter(max.temp > 34) %>%
+  group_by(site, year) %>%
+  tally() %>%
+  ungroup() %>%
+  filter(year < 2015) %>%
+  group_by(site) %>%
+  summarize(mean.days = mean(n), sd.days = sd(n), number = n(), se.days = sd.days/number)
+
+
+# Fig. S2: plot in situ data
+insitu.plots <- ggplot(in.situ.daily, aes(x = date_time_d, y = max.temp, color = location)) +
+  geom_line(aes(lty = site)) +
+  scale_x_date(date_breaks = "1 months") +
+  scale_color_manual(values = uaecols, name = "Location") +
+  scale_linetype_manual(values = 1:6, name = "Site") +
+  theme_bw() +
+  theme(legend.position = "top",
+        axis.text = element_text(color = "black"),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1)) +
+  ylab("Maxmimum daily temperature (ºC)")
+insitu.plots
+
+ggsave("Plots/Finished figures/Brandletal_UAE_NEE_FigS3.png",insitu.plots, width = 12, height = 6)
+
 ```
 
 We analyzed the community structure based on samples obtained via enclosed clove-oil stations. At every location, we sampled three distinct reefs (henceforth "Site"), and at each reef, we performed three separate clove-oil station collections. Every fish obtained from the samples was measured, weighed, identified, photographed, and stored in 95% ethanol. The dataset  is based on each individual fish (across rows), with all metadata stored in columns.
@@ -219,7 +422,8 @@ write.csv(taxlists, file = "Data/TaxaListLocation.csv")
 # get average GPS coordinates for each sampled site
 loccoord <- comms %>%
   group_by(Site) %>%
-  summarize(lat = mean(Lat), long = mean(Long))
+  summarize(lat = mean(Lat), long = mean(Long)) %>%
+  mutate(lat = round(lat, digits = 1), long = round(long, digits = 1))
 
 # get average surface area anbd standard errors of outcrops sampled in the Arabian Gulf and Gulf of Oman
 saavg <- comms %>%
@@ -246,7 +450,10 @@ comm_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summa
 # calculate quick summary statistics
 comm_summary <- comm_means %>%
   group_by(Location) %>%
-  summarize(mdens = mean(Abundance), mric = mean(Speciesrichness))
+  summarize(mdens = mean(Abundance), mric = mean(Speciesrichness), mbiom = mean(Biomass_per_m2),
+            sddens = sd(Abundance), sdric = sd(Speciesrichness), sdbiom = sd(Biomass_per_m2),
+            n = n(),
+            sedens = sddens/sqrt(n), seric = sdric/sqrt(n), sebiom = sdbiom/sqrt(n))
 
 
 
@@ -580,7 +787,7 @@ benth.cc <- benth.tidy %>%
 
 ####2. Data analysis####
 # run mds
-benth.mds <- metaMDS(benth.tidy[-c(1:4)], metric = "Bray", trymax = 1000)
+benth.mds <- metaMDS(sqrt(benth.tidy[-c(1:4)]), metric = "Bray", trymax = 1000)
 # examine mds
 benth.mds
 # examine stressplot
@@ -691,6 +898,26 @@ ctmin <- ctmin %>%
                               TRUE ~ 1),
            taxloc = factor(interaction(Tax, Location)))
 
+ctmaxsum <- ctmax %>%
+  group_by(Tax, Location) %>%
+  summarize(mean.temp = mean(Ctmax), sd.temp = sd(Ctmax), n = n(), se.temp = sqrt(sd.temp)/n)
+
+ctmax.meta <- ctmax %>% group_by(Location, Tax) %>%
+  tally()
+
+ctmin.meta <- ctmin %>% group_by(Location, Tax) %>%
+  tally()
+
+size.data <- ctmax %>%
+  filter(Tax %in% c("ENNEVENT"))
+
+size.plot <- ggplot(size.data, aes(x = log(TL), y = Ctmax, group = Tax, color = Location)) +
+  geom_point() +
+  geom_smooth(method = "lm", aes(lty = Location))
+
+ctminsum <- ctmin %>%
+  group_by(Tax, Location) %>%
+  summarize(mean.temp = mean(Ctmin), sd.temp = sd(Ctmin), n = n(), se.temp = sqrt(sd.temp)/n)
 ####2. Data analysis####
 # run Bayesian linear model to determine the effect of taxon and location combined ("taxloc") on thermal maxima
 maxmod <- brm(Ctmax ~ taxloc, data = ctmax,  control = list(adapt_delta = 0.995, max_treedepth = 18))
@@ -1359,6 +1586,17 @@ size.preds.event <- size.strs.event %>%
   add_fitted_draws(size.model.event, n = 500) %>%
   mutate(backtrans = exp(.value))
 
+# weight at mean bw
+size.preds.event.mean <- size.strs.event %>%
+  group_by(Location) %>%  
+  data_grid(TL = mean(TL)) %>%
+  add_fitted_draws(size.model.event, n = 500) %>%
+  mutate(backtrans = exp(.value)) %>%
+  group_by(Location) %>%
+  summarise(grams = list(enframe(quantile(backtrans, probs=c(0.025,0.5,0.975))))) %>%
+  unnest()
+size.preds.event.mean
+
 ####Fig. 5a####
 event.plot <- ggplot(size.preds.event, aes(x = TL, y = W, color = ordered(Location))) +
   geom_point(data = size.strs.event, aes(fill = Location), alpha = 0.8, size = 1.2, shape = 23, color = "black", stroke = 0.1) +
@@ -1394,6 +1632,17 @@ size.preds.canom <- size.strs.canom %>%
   data_grid(TL = seq_range(TL, n = 100)) %>%
   add_fitted_draws(size.model.canom, n = 500) %>%
   mutate(backtrans = exp(.value))
+
+size.preds.canom.mean <- size.strs.canom %>%
+  group_by(Location) %>%  
+  data_grid(TL = meam(TL)) %>%
+  add_fitted_draws(size.model.canom, n = 500) %>%
+  mutate(backtrans = exp(.value)) %>%
+  group_by(Location) %>%
+  summarise(grams = list(enframe(quantile(backtrans, probs=c(0.025,0.5,0.975))))) %>%
+  unnest()
+size.preds.canom.mean
+
 
 ####Fig. 5b####
 # plot data
@@ -1431,6 +1680,17 @@ size.preds.epulc <- size.strs.epulc %>%
   data_grid(TL = seq_range(TL, n = 100)) %>%
   add_fitted_draws(size.model.epulc, n = 500) %>%
   mutate(backtrans = exp(.value))
+
+
+size.preds.epulc.mean <- size.strs.epulc %>%
+  group_by(Location) %>%  
+  data_grid(TL = mean(TL)) %>%
+  add_fitted_draws(size.model.epulc, n = 500) %>%
+  mutate(backtrans = exp(.value)) %>%
+  group_by(Location) %>%
+  summarise(grams = list(enframe(quantile(backtrans, probs=c(0.025,0.5,0.975))))) %>%
+  unnest()
+size.preds.epulc.mean
 
 ####Fig. 5c####
 epulc.plot <- ggplot(size.preds.epulc, aes(x = TL, y = W, color = ordered(Location))) +
