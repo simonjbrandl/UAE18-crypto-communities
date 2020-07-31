@@ -450,8 +450,8 @@ comm_means <- comms %>% group_by(Location, Site, Sitename, Sitenumber) %>% summa
 # calculate quick summary statistics
 comm_summary <- comm_means %>%
   group_by(Location) %>%
-  summarize(mdens = mean(Abundance), mric = mean(Speciesrichness), mbiom = mean(Biomass_per_m2),
-            sddens = sd(Abundance), sdric = sd(Speciesrichness), sdbiom = sd(Biomass_per_m2),
+  summarize(mdens = mean(Abundance/SA), mric = mean(Speciesrichness/SA), mbiom = mean(Biomass_per_m2/SA),
+            sddens = sd(Abundance/SA), sdric = sd(Speciesrichness/SA), sdbiom = sd(Biomass_per_m2/SA),
             n = n(),
             sedens = sddens/sqrt(n), seric = sdric/sqrt(n), sebiom = sdbiom/sqrt(n))
 
