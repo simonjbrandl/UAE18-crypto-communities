@@ -1,11 +1,17 @@
--   [Extreme environmental conditions reduce coral reef fish
-    biodiversity and
-    productivity](#extreme-environmental-conditions-reduce-coral-reef-fish-biodiversity-and-productivity)
+-   [Summary](#summary)
+-   [Details & Contents](#details-contents)
+-   [Additional information and
+    resources](#additional-information-and-resources)
+
+Summary
+=======
 
 Extreme environmental conditions reduce coral reef fish biodiversity and productivity
-=====================================================================================
+-------------------------------------------------------------------------------------
 
 ### Simon J. Brandl, Jacob L. Johansen, Jordan M. Casey, Luke Tornabene, Renato A. Morais & John A. Burt
+
+### Nature Communications, 2020, <a href="https://doi.org/10.1038/s41467-020-17731-2" class="uri">https://doi.org/10.1038/s41467-020-17731-2</a>
 
 Tropical ectotherms are hypothesized to be vulnerable to environmental
 changes, but cas- cading effects of organismal tolerances on the
@@ -24,6 +30,9 @@ assemblages is greatly reduced on Earth’s hottest coral reefs. Extreme
 environmental con- ditions, as predicted for the end of the 21st
 century, could thus disrupt the community structure and productivity of
 a critical functional group, independent of live coral loss.
+
+Details & Contents
+==================
 
 The materials in this folder permit the reproduction of the results
 presented in Brandl et al. “Extreme environmental conditions reduce
@@ -74,6 +83,9 @@ is included.
       * Brandletal_UAE_NatComms_AuxilliaryScript.R: Script to process temperature data from the MODIS Aqua database.
       * rfishprod: folder that contains functions accessed during the modeling of growth and mortality in Chunk 12. Created by RA Morais. 
       
+
+Additional information and resources
+====================================
 
 All code written by Simon J. Brandl
 (<a href="mailto:simonjbrandl@gmail.com" class="email">simonjbrandl@gmail.com</a>
