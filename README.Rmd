@@ -19,7 +19,7 @@ The materials in this folder permit the reproduction of the results presented in
   * UAE18 crypto communities.Rproj: R-project file
   * UAE18_Rscript.Rmd: R-markdown file that contains all code necessary to reproduce the analyses. The script is divided into 11 chunks, that follow the flow of the manuscript:
   
-      1. SETUP
+*      1. SETUP
       
       2. LOAD PACKAGES
       
@@ -41,7 +41,7 @@ The materials in this folder permit the reproduction of the results presented in
       
       11. SIZE STRUCTURE AND ABUNDANCES
       
-      12. GROWTH MODELING
+      12. GROWTH MODELING*
       
 Each chunk has subsections pertaining to data wrangling, data analysis, and figures yielded by each analysis. Chunk 4 requires download of the MODIS Aqua temperature data (https://oceandata.sci.gsfc.nasa.gov/MODIS-Aqua/Mapped/Daily/4km/sst) from 2010 to 2018, which can be processed using the auxilliary script provided and are provided on FigShare (https://figshare.com/projects/Cryptobenthic_fish_assemblages_in_the_United_Arab_Emirates/81644). Chunk 12 requires the functions provided in the rfishprod package, which is included.
 

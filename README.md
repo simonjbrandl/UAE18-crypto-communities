@@ -37,29 +37,29 @@ The following elements are provided:
     to reproduce the analyses. The script is divided into 11 chunks,
     that follow the flow of the manuscript:
 
-    1.  SETUP
+-    1. SETUP
 
-    2.  LOAD PACKAGES
+        2. LOAD PACKAGES
 
-    3.  LOAD DATASETS AND SET AESTHETICS
+        3. LOAD DATASETS AND SET AESTHETICS
 
-    4.  TEMPERATURE MAP OF AREA
+        4. TEMPERATURE MAP OF AREA
 
-    5.  DETAILED TEMPERATURE DATA FROM IN SITU LOGGERS
+        5. DETAILED TEMPERATURE DATA FROM IN SITU LOGGERS
 
-    6.  COMMUNITY STRUCTURE: DIVERSITY, ABUNDANCE, BIOMASS
+        6. COMMUNITY STRUCTURE: DIVERSITY, ABUNDANCE, BIOMASS
 
-    7.  COMMUNITY COMPOSITION: FISH AND BENTHOS
+        7. COMMUNITY COMPOSITION: FISH AND BENTHOS
 
-    8.  PHYSIOLOGY: CTmax and CTmin
+        8. PHYSIOLOGY: CTmax and CTmin
 
-    9.  DIET METABARCODING: NETWORK ANALYSES
+        9. DIET METABARCODING: NETWORK ANALYSES
 
-    10. DIET METABARCODING: RAREFACTION
+        10. DIET METABARCODING: RAREFACTION
 
-    11. SIZE STRUCTURE AND ABUNDANCES
+        11. SIZE STRUCTURE AND ABUNDANCES
 
-    12. GROWTH MODELING
+        12. GROWTH MODELING*
 
 Each chunk has subsections pertaining to data wrangling, data analysis,
 and figures yielded by each analysis. Chunk 4 requires download of the
