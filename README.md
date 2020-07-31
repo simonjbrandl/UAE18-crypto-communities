@@ -32,34 +32,33 @@ Communications:
 <a href="https://doi.org/10.1038/s41467-020-17731-2" class="uri">https://doi.org/10.1038/s41467-020-17731-2</a>.
 The following elements are provided:
 
--   UAE18 crypto communities.Rproj: R-project file
--   UAE18\_Rscript.Rmd: R-markdown file that contains all code necessary
-    to reproduce the analyses. The script is divided into 11 chunks,
-    that follow the flow of the manuscript:
+    * UAE18 crypto communities.Rproj: R-project file
+    * UAE18_Rscript.Rmd: R-markdown file that contains all code necessary to reproduce the analyses. The script is divided into 11 chunks, that follow the flow of the manuscript:
 
-    -   1.  SETUP
-
-    -   1.  LOAD PACKAGES
-
-    -   1.  LOAD DATASETS AND SET AESTHETICS
-
-    1.  TEMPERATURE MAP OF AREA
-
-    2.  DETAILED TEMPERATURE DATA FROM IN SITU LOGGERS
-
-    3.  COMMUNITY STRUCTURE: DIVERSITY, ABUNDANCE, BIOMASS
-
-    4.  COMMUNITY COMPOSITION: FISH AND BENTHOS
-
-    5.  PHYSIOLOGY: CTmax and CTmin
-
-    6.  DIET METABARCODING: NETWORK ANALYSES
-
-    7.  DIET METABARCODING: RAREFACTION
-
-    8.  SIZE STRUCTURE AND ABUNDANCES
-
-    9.  GROWTH MODELING
+      1. SETUP
+      
+      2. LOAD PACKAGES
+      
+      3. LOAD DATASETS AND SET AESTHETICS
+      
+      4. TEMPERATURE MAP OF AREA
+      
+      5. DETAILED TEMPERATURE DATA FROM IN SITU LOGGERS
+      
+      6. COMMUNITY STRUCTURE: DIVERSITY, ABUNDANCE, BIOMASS
+      
+      7. COMMUNITY COMPOSITION: FISH AND BENTHOS
+      
+      8. PHYSIOLOGY: CTmax and CTmin
+      
+      9. DIET METABARCODING: NETWORK ANALYSES
+      
+      10. DIET METABARCODING: RAREFACTION
+      
+      11. SIZE STRUCTURE AND ABUNDANCES
+      
+      12. GROWTH MODELING
+      
 
 Each chunk has subsections pertaining to data wrangling, data analysis,
 and figures yielded by each analysis. Chunk 4 requires download of the

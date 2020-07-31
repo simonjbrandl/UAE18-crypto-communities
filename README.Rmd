@@ -16,14 +16,14 @@ Tropical ectotherms are hypothesized to be vulnerable to environmental changes, 
 
 The materials in this folder permit the reproduction of the results presented in Brandl et al. "Extreme environmental conditions reduce coral reef fish biodiversity and productivity," published in Nature Communications: https://doi.org/10.1038/s41467-020-17731-2. The following elements are provided:
 
-  * UAE18 crypto communities.Rproj: R-project file
-  * UAE18_Rscript.Rmd: R-markdown file that contains all code necessary to reproduce the analyses. The script is divided into 11 chunks, that follow the flow of the manuscript:
+    * UAE18 crypto communities.Rproj: R-project file
+    * UAE18_Rscript.Rmd: R-markdown file that contains all code necessary to reproduce the analyses. The script is divided into 11 chunks, that follow the flow of the manuscript:
   
-      * 1. SETUP
+      1. SETUP
       
-      * 2. LOAD PACKAGES
+      2. LOAD PACKAGES
       
-      * 3. LOAD DATASETS AND SET AESTHETICS
+      3. LOAD DATASETS AND SET AESTHETICS
       
       4. TEMPERATURE MAP OF AREA
       
